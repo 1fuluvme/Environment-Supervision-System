@@ -2850,6 +2850,237 @@ public class AdminUserApiCheck {
         System.out.println(
                 "处置工单查询、权限、指派和重复请求检查全部通过");
 
+        // =====================================================
+        // 网格员本人处置工单与结果提交检查
+        // =====================================================
+
+        HttpClient workOrderWorker = newClient();
+        login(
+                workOrderWorker,
+                secondPhone,
+                DEMO_PASSWORD);
+
+        String workerWorkOrderPath =
+                "/api/grid/work-orders";
+
+        String workerOrderDetailPath =
+                workerWorkOrderPath + "/" + workOrderId;
+
+        String submitWorkOrderResultPath =
+                workerOrderDetailPath + "/result";
+
+        // 一、本人列表的数据隔离。
+        get(newClient(), workerWorkOrderPath, 401);
+        get(citizen, workerWorkOrderPath, 403);
+        get(admin, workerWorkOrderPath, 403);
+        get(decisionAfterRemoval, workerWorkOrderPath, 403);
+
+        JsonNode otherWorkerOrders = get(
+                firstAgain,
+                workerWorkOrderPath,
+                200);
+
+        requireRecordId(
+                otherWorkerOrders,
+                workOrderId,
+                false);
+
+        JsonNode myWorkOrders = get(
+                workOrderWorker,
+                workerWorkOrderPath,
+                200);
+
+        requireRecordId(
+                myWorkOrders,
+                workOrderId,
+                true);
+
+        // 二、本人详情权限和ID校验。
+        get(newClient(), workerOrderDetailPath, 401);
+        get(citizen, workerOrderDetailPath, 403);
+        get(admin, workerOrderDetailPath, 403);
+        get(decisionAfterRemoval, workerOrderDetailPath, 403);
+        get(firstAgain, workerOrderDetailPath, 404);
+
+        JsonNode workerOrder = get(
+                workOrderWorker,
+                workerOrderDetailPath,
+                200);
+
+        checkWorkOrderResponse(
+                workerOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        get(workOrderWorker, workerWorkOrderPath + "/0", 400);
+        get(
+                workOrderWorker,
+                workerWorkOrderPath + "/" + Long.MAX_VALUE,
+                404);
+
+        LocalDateTime assignedAt = LocalDateTime.parse(
+                workerOrder.path("assignedAt").asText());
+
+        Map<String, Object> validWorkOrderResult =
+                Map.of(
+                        "handledAt",
+                        LocalDateTime.now().toString(),
+                        "measures",
+                        "对现场污染源进行临时停运，并清理散落污染物。",
+                        "result",
+                        "现场异味明显减弱，污染扩散已经得到控制。");
+
+        // 三、结果提交接口权限。
+        postJson(
+                newClient(),
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                401);
+
+        postJson(
+                citizen,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                403);
+
+        postJson(
+                admin,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                403);
+
+        postJson(
+                decisionAfterRemoval,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                403);
+
+        // 其他网格员不能提交该工单。
+        postJson(
+                firstAgain,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                404);
+
+        postJson(
+                workOrderWorker,
+                workerWorkOrderPath + "/0/result",
+                validWorkOrderResult,
+                400);
+
+        postJson(
+                workOrderWorker,
+                workerWorkOrderPath
+                        + "/"
+                        + Long.MAX_VALUE
+                        + "/result",
+                validWorkOrderResult,
+                404);
+
+        // 四、处理时间和必填内容校验。
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                Map.of(
+                        "handledAt",
+                        assignedAt.minusMinutes(1).toString(),
+                        "measures", "时间边界检查",
+                        "result", "不应保存"),
+                400);
+
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                Map.of(
+                        "handledAt",
+                        LocalDateTime.now()
+                                .plusDays(1)
+                                .toString(),
+                        "measures", "未来时间检查",
+                        "result", "不应保存"),
+                400);
+
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                Map.of(
+                        "handledAt", LocalDateTime.now().toString(),
+                        "measures", "",
+                        "result", "不应保存"),
+                400);
+
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                Map.of(
+                        "handledAt", LocalDateTime.now().toString(),
+                        "measures", "处置措施检查",
+                        "result", ""),
+                400);
+
+        // 五、正常提交后进入待复核。
+        JsonNode submittedOrder = postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                200);
+
+        checkWorkOrderResponse(
+                submittedOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING_REVIEW",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        if (!"对现场污染源进行临时停运，并清理散落污染物。"
+                .equals(submittedOrder.path("measures").asText())
+                || !"现场异味明显减弱，污染扩散已经得到控制。"
+                .equals(submittedOrder.path("result").asText())
+                || !submittedOrder.path("handledAt").isTextual()
+                || !submittedOrder.path("submittedAt").isTextual()) {
+
+            throw new IllegalStateException(
+                    "处置结果或提交时间不正确："
+                            + submittedOrder);
+        }
+
+        // 同一张待复核工单不能重复提交。
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                validWorkOrderResult,
+                409);
+
+        JsonNode pendingReviewOrders = get(
+                admin,
+                adminWorkOrderPath
+                        + "?status=PENDING_REVIEW",
+                200);
+
+        requireRecordId(
+                pendingReviewOrders,
+                workOrderId,
+                true);
+
+        JsonNode noLongerPendingOrders = get(
+                admin,
+                adminWorkOrderPath + "?status=PENDING",
+                200);
+
+        requireRecordId(
+                noLongerPendingOrders,
+                workOrderId,
+                false);
+
+        System.out.println(
+                "网格员工单查询、数据隔离和处置结果提交全部通过");
+
         // 五、退回异常检测时，应当自动排除对应待复核事件。
         postJson(
                 admin,
