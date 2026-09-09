@@ -35,6 +35,12 @@ import java.util.Set;
 
 import com.neps.dto.SubmitWorkOrderResultRequest;
 
+import com.neps.dto.ReviewWorkOrderRequest;
+import com.neps.entity.Warning;
+import com.neps.entity.WorkOrderReview;
+import com.neps.mapper.WarningMapper;
+import com.neps.mapper.WorkOrderReviewMapper;
+
 @Service
 public class WorkOrderServiceImpl
         extends ServiceImpl<WorkOrderMapper, WorkOrder>
@@ -57,6 +63,8 @@ public class WorkOrderServiceImpl
     private final FeedbackMapper feedbackMapper;
     private final AnomalyEventMapper anomalyEventMapper;
     private final OperationLogMapper operationLogMapper;
+    private final WarningMapper warningMapper;
+    private final WorkOrderReviewMapper workOrderReviewMapper;
 
     public WorkOrderServiceImpl(
             UserMapper userMapper,
@@ -65,7 +73,9 @@ public class WorkOrderServiceImpl
             GridMapper gridMapper,
             FeedbackMapper feedbackMapper,
             AnomalyEventMapper anomalyEventMapper,
-            OperationLogMapper operationLogMapper) {
+            OperationLogMapper operationLogMapper,
+            WarningMapper warningMapper,
+            WorkOrderReviewMapper workOrderReviewMapper) {
 
         this.userMapper = userMapper;
         this.userGridMapper = userGridMapper;
@@ -74,6 +84,8 @@ public class WorkOrderServiceImpl
         this.feedbackMapper = feedbackMapper;
         this.anomalyEventMapper = anomalyEventMapper;
         this.operationLogMapper = operationLogMapper;
+        this.warningMapper = warningMapper;
+        this.workOrderReviewMapper = workOrderReviewMapper;
     }
 
     @Override
@@ -410,6 +422,317 @@ public class WorkOrderServiceImpl
         }
 
         return toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    public WorkOrderResponse review(
+            Long workOrderId,
+            ReviewWorkOrderRequest request) {
+
+        requirePositiveId(workOrderId);
+
+        User admin = currentUser("ADMIN");
+
+        WorkOrder order = baseMapper.selectOne(
+                Wrappers.<WorkOrder>lambdaQuery()
+                        .eq(
+                                WorkOrder::getId,
+                                workOrderId)
+                        .last("FOR UPDATE"));
+
+        if (order == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "处置工单不存在");
+        }
+
+        requireAccess(admin, order);
+
+        if (!"PENDING_REVIEW".equals(
+                order.getStatus())) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "当前工单状态不允许复核");
+        }
+
+        Feedback feedback = feedbackMapper.selectOne(
+                Wrappers.<Feedback>lambdaQuery()
+                        .eq(
+                                Feedback::getId,
+                                order.getFeedbackId())
+                        .last("FOR UPDATE"));
+
+        AnomalyEvent event =
+                anomalyEventMapper.selectOne(
+                        Wrappers
+                                .<AnomalyEvent>lambdaQuery()
+                                .eq(
+                                        AnomalyEvent::getId,
+                                        order.getAnomalyEventId())
+                                .last("FOR UPDATE"));
+
+        Warning warning = warningMapper.selectOne(
+                Wrappers.<Warning>lambdaQuery()
+                        .eq(
+                                Warning::getAnomalyEventId,
+                                order.getAnomalyEventId())
+                        .last("FOR UPDATE"));
+
+        if (feedback == null
+                || event == null
+                || warning == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单关联的反馈、异常事件或预警不完整");
+        }
+
+        if (!"PROCESSING".equals(event.getStatus())
+                || !"ACTIVE".equals(warning.getStatus())
+                || !"PROCESSING".equals(feedback.getStatus())) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "关联业务状态不允许复核工单");
+        }
+
+        String decision = request.decision()
+                .trim()
+                .toUpperCase(Locale.ROOT);
+
+        String opinion = request.opinion().trim();
+
+        String publicReply =
+                request.publicReply() == null
+                        || request.publicReply().isBlank()
+                        ? null
+                        : request.publicReply().trim();
+
+        if ("CLOSE".equals(decision)
+                && publicReply == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "关闭工单时必须填写公众办理说明");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        saveReviewHistory(
+                order,
+                admin,
+                decision,
+                opinion,
+                publicReply,
+                now);
+
+        if ("RETURN".equals(decision)) {
+            returnWorkOrder(
+                    order,
+                    admin,
+                    opinion,
+                    now);
+        } else {
+            closeWorkOrder(
+                    order,
+                    event,
+                    warning,
+                    feedback,
+                    admin,
+                    opinion,
+                    publicReply,
+                    now);
+        }
+
+        return toResponse(
+                baseMapper.selectById(order.getId()));
+    }
+
+    private void saveReviewHistory(
+            WorkOrder order,
+            User admin,
+            String decision,
+            String opinion,
+            String publicReply,
+            LocalDateTime now) {
+
+        if (order.getHandledAt() == null
+                || order.getMeasures() == null
+                || order.getResult() == null) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单缺少处置结果");
+        }
+
+        WorkOrderReview review =
+                new WorkOrderReview();
+
+        review.setWorkOrderId(order.getId());
+        review.setReviewerId(admin.getId());
+        review.setDecision(decision);
+        review.setHandledAt(order.getHandledAt());
+        review.setMeasures(order.getMeasures());
+        review.setResult(order.getResult());
+        review.setOpinion(opinion);
+        review.setPublicReply(publicReply);
+        review.setReviewedAt(now);
+
+        if (workOrderReviewMapper.insert(review) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单复核历史保存失败");
+        }
+    }
+
+    private void returnWorkOrder(
+            WorkOrder order,
+            User admin,
+            String opinion,
+            LocalDateTime now) {
+
+        order.setStatus("PENDING");
+        order.setReviewedBy(admin.getId());
+        order.setReviewedAt(now);
+        order.setReviewOpinion(opinion);
+        order.setUpdatedAt(now);
+
+        if (baseMapper.updateById(order) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单退回失败");
+        }
+
+        saveWorkOrderReviewLog(
+                order,
+                admin,
+                "RETURN_RESULT",
+                "PENDING_REVIEW",
+                "PENDING",
+                opinion);
+    }
+
+    private void closeWorkOrder(
+            WorkOrder order,
+            AnomalyEvent event,
+            Warning warning,
+            Feedback feedback,
+            User admin,
+            String opinion,
+            String publicReply,
+            LocalDateTime now) {
+
+        order.setStatus("CLOSED");
+        order.setReviewedBy(admin.getId());
+        order.setReviewedAt(now);
+        order.setReviewOpinion(opinion);
+        order.setUpdatedAt(now);
+
+        event.setStatus("CLOSED");
+        event.setUpdatedAt(now);
+
+        warning.setStatus("CLOSED");
+        warning.setClosedAt(now);
+        warning.setUpdatedAt(now);
+
+        if (baseMapper.updateById(order) != 1
+                || anomalyEventMapper.updateById(event) != 1
+                || warningMapper.updateById(warning) != 1) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单、异常事件或预警关闭失败");
+        }
+
+        Long unfinishedCount =
+                baseMapper.selectCount(
+                        Wrappers
+                                .<WorkOrder>lambdaQuery()
+                                .eq(
+                                        WorkOrder::getFeedbackId,
+                                        feedback.getId())
+                                .ne(
+                                        WorkOrder::getId,
+                                        order.getId())
+                                .ne(
+                                        WorkOrder::getStatus,
+                                        "CLOSED"));
+
+        if (unfinishedCount == null
+                || unfinishedCount == 0) {
+
+            feedback.setStatus("COMPLETED");
+            feedback.setPublicReply(publicReply);
+
+            if (feedbackMapper.updateById(feedback) != 1) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "公众反馈完成状态更新失败");
+            }
+
+            saveFeedbackCloseLog(
+                    feedback,
+                    admin,
+                    publicReply);
+        }
+
+        saveWorkOrderReviewLog(
+                order,
+                admin,
+                "CLOSE",
+                "PENDING_REVIEW",
+                "CLOSED",
+                opinion);
+    }
+
+    private void saveWorkOrderReviewLog(
+            WorkOrder order,
+            User admin,
+            String action,
+            String fromStatus,
+            String toStatus,
+            String opinion) {
+
+        OperationLog log = new OperationLog();
+        log.setBusinessType("WORK_ORDER");
+        log.setBusinessId(order.getId());
+        log.setAction(action);
+        log.setOperatorId(admin.getId());
+        log.setFromStatus(fromStatus);
+        log.setToStatus(toStatus);
+        log.setFromAssigneeId(order.getAssigneeId());
+        log.setToAssigneeId(order.getAssigneeId());
+        log.setRemark(opinion);
+
+        if (operationLogMapper.insert(log) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单复核操作记录保存失败");
+        }
+    }
+
+    private void saveFeedbackCloseLog(
+            Feedback feedback,
+            User admin,
+            String publicReply) {
+
+        OperationLog log = new OperationLog();
+        log.setBusinessType("FEEDBACK");
+        log.setBusinessId(feedback.getId());
+        log.setAction("CLOSE_DISPOSAL");
+        log.setOperatorId(admin.getId());
+        log.setFromStatus("PROCESSING");
+        log.setToStatus("COMPLETED");
+        log.setRemark(publicReply);
+
+        if (operationLogMapper.insert(log) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "反馈完成操作记录保存失败");
+        }
     }
 
     private WorkOrderResponse toResponse(

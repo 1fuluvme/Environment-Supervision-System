@@ -3127,6 +3127,255 @@ public class AdminUserApiCheck {
         requireRecordId(excludedAnomalies, concentratedEventId, true);
         requireRecordId(excludedAnomalies, jumpEventId, true);
 
+        // =====================================================
+        // 管理员工单退回、补充提交与关闭检查
+        // =====================================================
+
+        String workOrderReviewPath =
+                workOrderDetailPath + "/review";
+
+        Map<String, Object> returnWorkOrderRequest =
+                Map.of(
+                        "decision", "RETURN",
+                        "opinion", "请补充现场清理后的复测说明");
+
+        // 一、复核接口的身份和角色权限。
+        postJson(
+                newClient(),
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                401);
+
+        postJson(
+                citizen,
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                403);
+
+        postJson(
+                workOrderWorker,
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                403);
+
+        postJson(
+                decisionAfterRemoval,
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                403);
+
+        // 二、ID和请求参数校验。
+        postJson(
+                admin,
+                adminWorkOrderPath + "/0/review",
+                returnWorkOrderRequest,
+                400);
+
+        postJson(
+                admin,
+                adminWorkOrderPath
+                        + "/"
+                        + Long.MAX_VALUE
+                        + "/review",
+                returnWorkOrderRequest,
+                404);
+
+        postJson(
+                admin,
+                workOrderReviewPath,
+                Map.of(
+                        "decision", "APPROVE",
+                        "opinion", "错误决定值"),
+                400);
+
+        postJson(
+                admin,
+                workOrderReviewPath,
+                Map.of(
+                        "decision", "RETURN",
+                        "opinion", ""),
+                400);
+
+        postJson(
+                admin,
+                workOrderReviewPath,
+                Map.of(
+                        "decision", "CLOSE",
+                        "opinion", "处置结果符合要求"),
+                400);
+
+        // 三、第一次复核退回到PENDING。
+        JsonNode returnedWorkOrder = postJson(
+                admin,
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                200);
+
+        checkWorkOrderResponse(
+                returnedWorkOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        if (!"请补充现场清理后的复测说明".equals(
+                returnedWorkOrder.path("reviewOpinion").asText())
+                || returnedWorkOrder.path("reviewedBy").asLong() <= 0
+                || !returnedWorkOrder.path("reviewedAt").isTextual()) {
+
+            throw new IllegalStateException(
+                    "工单退回复核信息不正确："
+                            + returnedWorkOrder);
+        }
+
+        // 工单已不是待复核状态，不能连续复核。
+        postJson(
+                admin,
+                workOrderReviewPath,
+                returnWorkOrderRequest,
+                409);
+
+        // 四、网格员补充结果并再次提交。
+        Map<String, Object> supplementedWorkOrderResult =
+                Map.of(
+                        "handledAt",
+                        LocalDateTime.now().toString(),
+                        "measures",
+                        "完成现场清理，并对污染点进行覆盖和隔离。",
+                        "result",
+                        "复测时现场异味消失，污染扩散已经停止。");
+
+        JsonNode resubmittedWorkOrder = postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                supplementedWorkOrderResult,
+                200);
+
+        checkWorkOrderResponse(
+                resubmittedWorkOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING_REVIEW",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        if (!"完成现场清理，并对污染点进行覆盖和隔离。"
+                .equals(resubmittedWorkOrder.path("measures").asText())
+                || !"复测时现场异味消失，污染扩散已经停止。"
+                .equals(resubmittedWorkOrder.path("result").asText())) {
+
+            throw new IllegalStateException(
+                    "工单补充提交内容不正确："
+                            + resubmittedWorkOrder);
+        }
+
+        // 五、第二次复核通过并关闭整个处置流程。
+        String finalPublicReply =
+                "污染问题已完成现场处置和复核，相关预警已经解除。";
+
+        Map<String, Object> closeWorkOrderRequest =
+                Map.of(
+                        "decision", "CLOSE",
+                        "opinion", "补充材料完整，处置结果符合要求",
+                        "publicReply", finalPublicReply);
+
+        JsonNode closedWorkOrder = postJson(
+                admin,
+                workOrderReviewPath,
+                closeWorkOrderRequest,
+                200);
+
+        checkWorkOrderResponse(
+                closedWorkOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "CLOSED",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        if (!"补充材料完整，处置结果符合要求".equals(
+                closedWorkOrder.path("reviewOpinion").asText())) {
+            throw new IllegalStateException(
+                    "工单关闭复核意见不正确："
+                            + closedWorkOrder);
+        }
+
+        postJson(
+                admin,
+                workOrderReviewPath,
+                closeWorkOrderRequest,
+                409);
+
+        postJson(
+                workOrderWorker,
+                submitWorkOrderResultPath,
+                supplementedWorkOrderResult,
+                409);
+
+        // 六、检查工单、事件、预警和公众反馈的最终状态。
+        JsonNode closedOrders = get(
+                admin,
+                adminWorkOrderPath + "?status=CLOSED",
+                200);
+
+        requireRecordId(
+                closedOrders,
+                workOrderId,
+                true);
+
+        checkAnomalyResponse(
+                get(
+                        admin,
+                        adminAnomalyPath + "/" + highAqiEventId,
+                        200),
+                highAqiEventId,
+                highAqiMeasurementId,
+                "CLOSED",
+                "HIGH",
+                "MEDIUM");
+
+        JsonNode disposedFeedback = get(
+                admin,
+                "/api/admin/feedbacks/"
+                        + highAqiCase.feedbackId(),
+                200);
+
+        if (!"COMPLETED".equals(
+                disposedFeedback.path("status").asText())
+                || !finalPublicReply.equals(
+                disposedFeedback.path("publicReply").asText())) {
+
+            throw new IllegalStateException(
+                    "工单关闭后反馈状态或公众说明不正确："
+                            + disposedFeedback);
+        }
+
+        JsonNode publicCompletedFeedback = get(
+                secondCitizen,
+                "/api/feedbacks/"
+                        + highAqiCase.feedbackId(),
+                200);
+
+        if (!"COMPLETED".equals(
+                publicCompletedFeedback.path("status").asText())
+                || !finalPublicReply.equals(
+                publicCompletedFeedback.path("publicReply").asText())) {
+
+            throw new IllegalStateException(
+                    "公众没有看到最终处置结果："
+                            + publicCompletedFeedback);
+        }
+
+        checkClosedWarning(highAqiEventId);
+        checkWorkOrderReviewHistory(workOrderId);
+
+        System.out.println(
+                "工单退回、补充、关闭和公众结果联动全部通过");
+
         System.out.println(
                 "异常事件查询、确认、排除和状态联动全部通过");
 
@@ -3515,6 +3764,81 @@ public class AdminUserApiCheck {
 
             throw new IllegalStateException(
                     "处置工单响应不符合预期：" + order);
+        }
+    }
+
+    private static void checkClosedWarning(
+            long anomalyEventId) throws Exception {
+
+        String sql = "SELECT status, closed_at "
+                + "FROM biz_warning "
+                + "WHERE anomaly_event_id = ?";
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement =
+                     connection.prepareStatement(sql)) {
+
+            statement.setLong(1, anomalyEventId);
+
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()
+                        || !"CLOSED".equals(
+                        result.getString("status"))
+                        || result.getTimestamp("closed_at") == null) {
+
+                    throw new IllegalStateException(
+                            "工单关闭后预警没有同步关闭，anomalyEventId="
+                                    + anomalyEventId);
+                }
+            }
+        }
+    }
+
+    private static void checkWorkOrderReviewHistory(
+            long workOrderId) throws Exception {
+
+        String sql = "SELECT decision, measures, result, opinion, "
+                + "public_reply FROM biz_work_order_review "
+                + "WHERE work_order_id = ? ORDER BY id";
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement =
+                     connection.prepareStatement(sql)) {
+
+            statement.setLong(1, workOrderId);
+
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()
+                        || !"RETURN".equals(
+                        result.getString("decision"))
+                        || !"对现场污染源进行临时停运，并清理散落污染物。"
+                        .equals(result.getString("measures"))
+                        || result.getString("public_reply") != null) {
+
+                    throw new IllegalStateException(
+                            "第一次工单退回历史不正确，workOrderId="
+                                    + workOrderId);
+                }
+
+                if (!result.next()
+                        || !"CLOSE".equals(
+                        result.getString("decision"))
+                        || !"完成现场清理，并对污染点进行覆盖和隔离。"
+                        .equals(result.getString("measures"))
+                        || !"污染问题已完成现场处置和复核，相关预警已经解除。"
+                        .equals(result.getString("public_reply"))) {
+
+                    throw new IllegalStateException(
+                            "第二次工单关闭历史不正确，workOrderId="
+                                    + workOrderId);
+                }
+
+                if (result.next()) {
+                    throw new IllegalStateException(
+                            "工单复核历史数量应为2，workOrderId="
+                                    + workOrderId);
+                }
+            }
         }
     }
 

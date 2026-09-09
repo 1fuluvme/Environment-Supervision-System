@@ -5,6 +5,7 @@ import com.neps.dto.AssignWorkOrderRequest;
 import com.neps.dto.WorkOrderResponse;
 import com.neps.entity.WorkOrder;
 import com.neps.dto.SubmitWorkOrderResultRequest;
+import com.neps.dto.ReviewWorkOrderRequest;
 
 import java.util.List;
 
@@ -30,4 +31,8 @@ public interface WorkOrderService
     WorkOrderResponse submitResult(
             Long workOrderId,
             SubmitWorkOrderResultRequest request);
+
+    WorkOrderResponse review(
+            Long workOrderId,
+            ReviewWorkOrderRequest request);
 }

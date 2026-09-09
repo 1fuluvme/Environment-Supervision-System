@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
+import com.neps.dto.ReviewWorkOrderRequest;
 
 import java.util.List;
 
@@ -60,6 +61,19 @@ public class AdminWorkOrderController {
             AssignWorkOrderRequest request) {
 
         return workOrderService.assign(
+                workOrderId,
+                request);
+    }
+
+    @Operation(summary = "退回或关闭处置工单")
+    @PostMapping("/{workOrderId}/review")
+    public WorkOrderResponse review(
+            @PathVariable("workOrderId")
+            Long workOrderId,
+            @Valid @RequestBody
+            ReviewWorkOrderRequest request) {
+
+        return workOrderService.review(
                 workOrderId,
                 request);
     }
