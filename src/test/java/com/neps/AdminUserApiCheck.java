@@ -2614,6 +2614,242 @@ public class AdminUserApiCheck {
                             + confirmedFeedback);
         }
 
+        // =====================================================
+        // 管理员处置工单查询与指派检查
+        // =====================================================
+
+        long workOrderId =
+                findWorkOrderId(highAqiEventId);
+
+        String adminWorkOrderPath =
+                "/api/admin/work-orders";
+
+        String workOrderDetailPath =
+                adminWorkOrderPath + "/" + workOrderId;
+
+        String workOrderAssignPath =
+                workOrderDetailPath + "/assign";
+
+        // 一、列表接口的身份、角色和筛选检查。
+        get(newClient(), adminWorkOrderPath, 401);
+        get(citizen, adminWorkOrderPath, 403);
+        get(secondClient, adminWorkOrderPath, 403);
+        get(decisionAfterRemoval, adminWorkOrderPath, 403);
+
+        JsonNode pendingConfirmOrders = get(
+                admin,
+                adminWorkOrderPath
+                        + "?status=PENDING_CONFIRM",
+                200);
+
+        requireRecordId(
+                pendingConfirmOrders,
+                workOrderId,
+                true);
+
+        JsonNode mediumOrders = get(
+                admin,
+                adminWorkOrderPath + "?priority=MEDIUM",
+                200);
+
+        requireRecordId(
+                mediumOrders,
+                workOrderId,
+                true);
+
+        get(
+                admin,
+                adminWorkOrderPath + "?status=UNKNOWN",
+                400);
+
+        get(
+                admin,
+                adminWorkOrderPath + "?priority=URGENT",
+                400);
+
+        // 二、详情接口权限与ID校验。
+        get(newClient(), workOrderDetailPath, 401);
+        get(citizen, workOrderDetailPath, 403);
+        get(secondClient, workOrderDetailPath, 403);
+        get(decisionAfterRemoval, workOrderDetailPath, 403);
+
+        checkWorkOrderResponse(
+                get(admin, workOrderDetailPath, 200),
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING_CONFIRM",
+                null,
+                null);
+
+        get(admin, adminWorkOrderPath + "/0", 400);
+        get(
+                admin,
+                adminWorkOrderPath + "/" + Long.MAX_VALUE,
+                404);
+
+        Map<String, Object> assignWorkOrderRequest =
+                Map.of(
+                        "assigneeId", secondId,
+                        "requirement", "尽快到现场采取污染控制措施");
+
+        // 三、指派接口权限、ID和请求参数检查。
+        postJson(
+                newClient(),
+                workOrderAssignPath,
+                assignWorkOrderRequest,
+                401);
+
+        postJson(
+                citizen,
+                workOrderAssignPath,
+                assignWorkOrderRequest,
+                403);
+
+        postJson(
+                secondClient,
+                workOrderAssignPath,
+                assignWorkOrderRequest,
+                403);
+
+        postJson(
+                decisionAfterRemoval,
+                workOrderAssignPath,
+                assignWorkOrderRequest,
+                403);
+
+        postJson(
+                admin,
+                adminWorkOrderPath + "/0/assign",
+                assignWorkOrderRequest,
+                400);
+
+        postJson(
+                admin,
+                adminWorkOrderPath
+                        + "/"
+                        + Long.MAX_VALUE
+                        + "/assign",
+                assignWorkOrderRequest,
+                404);
+
+        postJson(
+                admin,
+                workOrderAssignPath,
+                Map.of(
+                        "assigneeId", 0,
+                        "requirement", "错误网格员ID"),
+                400);
+
+        postJson(
+                admin,
+                workOrderAssignPath,
+                Map.of(
+                        "assigneeId", secondId,
+                        "requirement", ""),
+                400);
+
+        // 公众不是网格员。
+        postJson(
+                admin,
+                workOrderAssignPath,
+                Map.of(
+                        "assigneeId", publicUser.path("id").asLong(),
+                        "requirement", "错误角色检查"),
+                400);
+
+        // 第一名网格员的网格关联已被撤销。
+        postJson(
+                admin,
+                workOrderAssignPath,
+                Map.of(
+                        "assigneeId", workerId,
+                        "requirement", "错误网格范围检查"),
+                400);
+
+        // 已停用的网格员不能接收工单。
+        String secondEnabledPath =
+                "/api/admin/users/"
+                        + secondId
+                        + "/enabled";
+
+        postJson(
+                admin,
+                secondEnabledPath,
+                Map.of("enabled", false),
+                200);
+
+        try {
+            postJson(
+                    admin,
+                    workOrderAssignPath,
+                    assignWorkOrderRequest,
+                    400);
+        } finally {
+            postJson(
+                    admin,
+                    secondEnabledPath,
+                    Map.of("enabled", true),
+                    200);
+        }
+
+        // 四、正常指派及重复请求检查。
+        checkWorkOrderResponse(
+                postJson(
+                        admin,
+                        workOrderAssignPath,
+                        assignWorkOrderRequest,
+                        200),
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        // 完全相同的重复请求应当幂等返回。
+        postJson(
+                admin,
+                workOrderAssignPath,
+                assignWorkOrderRequest,
+                200);
+
+        // 已指派工单不能通过首次指派接口修改要求。
+        postJson(
+                admin,
+                workOrderAssignPath,
+                Map.of(
+                        "assigneeId", secondId,
+                        "requirement", "尝试修改已经确认的工单"),
+                409);
+
+        JsonNode assignedOrder = get(
+                admin,
+                workOrderDetailPath,
+                200);
+
+        checkWorkOrderResponse(
+                assignedOrder,
+                workOrderId,
+                highAqiEventId,
+                highAqiCase.feedbackId(),
+                "PENDING",
+                secondId,
+                "尽快到现场采取污染控制措施");
+
+        JsonNode pendingOrders = get(
+                admin,
+                adminWorkOrderPath + "?status=PENDING",
+                200);
+
+        requireRecordId(
+                pendingOrders,
+                workOrderId,
+                true);
+
+        System.out.println(
+                "处置工单查询、权限、指派和重复请求检查全部通过");
+
         // 五、退回异常检测时，应当自动排除对应待复核事件。
         postJson(
                 admin,
@@ -2986,6 +3222,68 @@ public class AdminUserApiCheck {
                 }
                 return result.getLong("id");
             }
+        }
+    }
+
+    private static long findWorkOrderId(
+            long anomalyEventId) throws Exception {
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT id FROM biz_work_order "
+                             + "WHERE anomaly_event_id = ?")) {
+
+            statement.setLong(1, anomalyEventId);
+
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalStateException(
+                            "已确认异常没有生成处置工单，anomalyEventId="
+                                    + anomalyEventId);
+                }
+                return result.getLong("id");
+            }
+        }
+    }
+
+    private static void checkWorkOrderResponse(
+            JsonNode order,
+            long expectedOrderId,
+            long expectedAnomalyEventId,
+            long expectedFeedbackId,
+            String expectedStatus,
+            Long expectedAssigneeId,
+            String expectedRequirement) {
+
+        boolean assigneeInvalid =
+                expectedAssigneeId == null
+                        ? !order.path("assigneeId").isNull()
+                        : order.path("assigneeId").asLong()
+                        != expectedAssigneeId;
+
+        boolean requirementInvalid =
+                expectedRequirement == null
+                        ? !order.path("requirement").isNull()
+                        : !expectedRequirement.equals(
+                        order.path("requirement").asText());
+
+        if (order.path("id").asLong() != expectedOrderId
+                || order.path("anomalyEventId").asLong()
+                != expectedAnomalyEventId
+                || order.path("feedbackId").asLong()
+                != expectedFeedbackId
+                || !expectedStatus.equals(
+                order.path("status").asText())
+                || !"MEDIUM".equals(
+                order.path("priority").asText())
+                || assigneeInvalid
+                || requirementInvalid
+                || !order.path("address").isTextual()
+                || !order.path("description").isTextual()
+                || !order.path("triggerReason").isTextual()) {
+
+            throw new IllegalStateException(
+                    "处置工单响应不符合预期：" + order);
         }
     }
 
