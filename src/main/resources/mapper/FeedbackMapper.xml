@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC
+        "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.neps.mapper.FeedbackMapper">
+
+    <select id="selectAccessibleForAdmin"
+            resultType="com.neps.entity.Feedback">
+
+        WITH RECURSIVE grant_ancestors AS (
+        SELECT
+        ur.region_id AS grant_id,
+        r.id,
+        r.parent_id,
+        r.enabled
+        FROM sys_user_region ur
+        JOIN sys_region r
+        ON r.id = ur.region_id
+        WHERE ur.user_id = #{adminId}
+
+        UNION DISTINCT
+
+        SELECT
+        parent.grant_id,
+        r.id,
+        r.parent_id,
+        r.enabled
+        FROM grant_ancestors parent
+        JOIN sys_region r
+        ON r.id = parent.parent_id
+        ),
+        accessible_regions AS (
+        SELECT
+        r.id,
+        r.parent_id
+        FROM sys_user_region ur
+        JOIN sys_region r
+        ON r.id = ur.region_id
+        WHERE ur.user_id = #{adminId}
+        AND NOT EXISTS (
+        SELECT 1
+        FROM grant_ancestors ancestor
+        WHERE ancestor.grant_id = r.id
+        AND ancestor.enabled &lt;&gt; 1
+        )
+
+        UNION DISTINCT
+
+        SELECT
+        child.id,
+        child.parent_id
+        FROM sys_region child
+        JOIN accessible_regions parent
+        ON child.parent_id = parent.id
+        WHERE child.enabled = 1
+        ),
+        filtered_regions AS (
+        SELECT
+        id,
+        parent_id
+        FROM accessible_regions
+        WHERE #{regionId} IS NULL
+        OR id = #{regionId}
+
+        UNION DISTINCT
+
+        SELECT
+        child.id,
+        child.parent_id
+        FROM accessible_regions child
+        JOIN filtered_regions parent
+        ON child.parent_id = parent.id
+        )
+
+        SELECT DISTINCT
+        f.id,
+        f.submitter_id,
+        f.grid_id,
+        f.address,
+        f.observed_at,
+        f.description,
+        f.status,
+        f.public_reply,
+        f.created_at,
+        f.updated_at
+        FROM biz_feedback f
+        JOIN sys_grid g
+        ON g.id = f.grid_id
+        JOIN filtered_regions r
+        ON r.id = g.region_id
+
+        <where>
+            <if test="status != null">
+                AND f.status = #{status}
+            </if>
+
+            <if test="from != null">
+                AND f.created_at &gt;= #{from}
+            </if>
+
+            <if test="to != null">
+                AND f.created_at &lt;= #{to}
+            </if>
+        </where>
+
+        ORDER BY f.created_at DESC, f.id DESC
+    </select>
+
+</mapper>

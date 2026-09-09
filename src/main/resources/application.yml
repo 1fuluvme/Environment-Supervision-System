@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: neps-backend
+  datasource:
+    url: "jdbc:mysql://localhost:3306/neps?characterEncoding=UTF-8&serverTimezone=Asia/Shanghai"
+    username: root
+    password: 212206
+  mvc:
+    problemdetails:
+      enabled: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+app:
+  upload:
+    directory: ${UPLOAD_DIR:./uploads}
+
+  anomaly:
+    aqi-threshold: 100
+    high-aqi-threshold: 200
+    jump-threshold: 80
+    high-jump-threshold: 150
+    duplicate-window-hours: 24
+    duplicate-feedback-count: 3
+    high-duplicate-feedback-count: 5
+    rule-version: DEMO-RULE-1
+

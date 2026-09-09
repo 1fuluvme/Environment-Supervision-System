@@ -1,0 +1,47 @@
+package com.neps.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+public record MeasurementResponse(
+        Long id,
+        Long taskId,
+        Long feedbackId,
+        Long submitterId,
+        Integer versionNo,
+        LocalDateTime measuredAt,
+        String location,
+        String reportType,
+        String dataSource,
+        BigDecimal so2,
+        BigDecimal no2,
+        BigDecimal co,
+        BigDecimal o3,
+        BigDecimal pm10,
+        BigDecimal pm25,
+        String missingReason,
+        Byte statisticallyValid,
+        String invalidReason,
+        String qualityFlag,
+        Integer so2Iaqi,
+        Integer no2Iaqi,
+        Integer coIaqi,
+        Integer o3Iaqi,
+        Integer pm10Iaqi,
+        Integer pm25Iaqi,
+        Byte aqiCalculable,
+        Integer aqi,
+        Byte aqiLevel,
+        String aqiCategory,
+        String primaryPollutants,
+        String calculationReason,
+        String standardVersion,
+        String ruleStatus,
+        String ruleReason,
+        String suggestedPriority,
+        String ruleVersion,
+        LocalDateTime ruleEvaluatedAt,
+        String siteNote,
+        String reviewStatus,
+        LocalDateTime submittedAt) {
+}
