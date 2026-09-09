@@ -35,6 +35,11 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
+import com.neps.entity.Warning;
+import com.neps.entity.WorkOrder;
+import com.neps.mapper.WarningMapper;
+import com.neps.mapper.WorkOrderMapper;
+
 @Service
 public class AnomalyEventServiceImpl
         extends ServiceImpl<AnomalyEventMapper, AnomalyEvent>
@@ -61,6 +66,8 @@ public class AnomalyEventServiceImpl
     private final MeasurementMapper measurementMapper;
     private final MeasurementReviewMapper measurementReviewMapper;
     private final OperationLogMapper operationLogMapper;
+    private final WarningMapper warningMapper;
+    private final WorkOrderMapper workOrderMapper;
 
     public AnomalyEventServiceImpl(
             UserMapper userMapper,
@@ -70,7 +77,8 @@ public class AnomalyEventServiceImpl
             InspectionTaskMapper inspectionTaskMapper,
             MeasurementMapper measurementMapper,
             MeasurementReviewMapper measurementReviewMapper,
-            OperationLogMapper operationLogMapper) {
+            OperationLogMapper operationLogMapper,WarningMapper warningMapper,
+            WorkOrderMapper workOrderMapper) {
 
         this.userMapper = userMapper;
         this.userRegionMapper = userRegionMapper;
@@ -81,6 +89,8 @@ public class AnomalyEventServiceImpl
         this.measurementReviewMapper =
                 measurementReviewMapper;
         this.operationLogMapper = operationLogMapper;
+        this.warningMapper = warningMapper;
+        this.workOrderMapper = workOrderMapper;
     }
 
     @Override
@@ -385,6 +395,66 @@ public class AnomalyEventServiceImpl
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "异常检测复核记录保存失败");
+        }
+
+        createDisposalSuggestion(
+                event,
+                feedback,
+                admin,
+                confirmedPriority,
+                now);
+    }
+
+    private void createDisposalSuggestion(
+            AnomalyEvent event,
+            Feedback feedback,
+            User admin,
+            String confirmedPriority,
+            LocalDateTime now) {
+
+        Warning warning = new Warning();
+        warning.setAnomalyEventId(event.getId());
+        warning.setGridId(event.getGridId());
+        warning.setWarningLevel(confirmedPriority);
+        warning.setTitle("污染异常预警");
+        warning.setContent(event.getTriggerReason());
+        warning.setStatus("ACTIVE");
+        warning.setCreatedAt(now);
+        warning.setUpdatedAt(now);
+
+        if (warningMapper.insert(warning) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "污染预警生成失败");
+        }
+
+        WorkOrder workOrder = new WorkOrder();
+        workOrder.setAnomalyEventId(event.getId());
+        workOrder.setFeedbackId(feedback.getId());
+        workOrder.setGridId(event.getGridId());
+        workOrder.setPriority(confirmedPriority);
+        workOrder.setStatus("PENDING_CONFIRM");
+        workOrder.setCreatedAt(now);
+        workOrder.setUpdatedAt(now);
+
+        if (workOrderMapper.insert(workOrder) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "待确认处置工单生成失败");
+        }
+
+        OperationLog log = new OperationLog();
+        log.setBusinessType("WORK_ORDER");
+        log.setBusinessId(workOrder.getId());
+        log.setAction("CREATE_SUGGESTION");
+        log.setOperatorId(admin.getId());
+        log.setToStatus("PENDING_CONFIRM");
+        log.setRemark("根据已确认污染异常自动生成处置工单建议");
+
+        if (operationLogMapper.insert(log) != 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "工单生成记录保存失败");
         }
     }
 
