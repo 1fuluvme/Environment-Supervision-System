@@ -37,8 +37,9 @@ public class CodeGenerator {
                                 projectDir + "/src/main/resources/mapper")))
                 .strategyConfig(builder -> {
                     builder.addInclude(
-                                    "biz_import_batch",
-                                    "biz_external_aqi")
+                                    "biz_external_weather",
+                                    "biz_external_emission",
+                                    "biz_external_traffic")
                             .addTablePrefix("biz_");
 
                     builder.serviceBuilder()
