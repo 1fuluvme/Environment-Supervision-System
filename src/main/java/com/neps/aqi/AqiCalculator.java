@@ -260,7 +260,7 @@ public final class AqiCalculator {
                 reason);
     }
 
-    private static int level(int aqi) {
+    public static int level(int aqi) {
         if (aqi <= 50) {
             return 1;
         }
@@ -279,7 +279,7 @@ public final class AqiCalculator {
         return 6;
     }
 
-    private static String category(int aqi) {
+    public static String category(int aqi) {
         return switch (level(aqi)) {
             case 1 -> "优";
             case 2 -> "良";

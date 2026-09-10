@@ -36,7 +36,9 @@ public class CodeGenerator {
                                 OutputFile.xml,
                                 projectDir + "/src/main/resources/mapper")))
                 .strategyConfig(builder -> {
-                    builder.addInclude("biz_work_order_review")
+                    builder.addInclude(
+                                    "biz_import_batch",
+                                    "biz_external_aqi")
                             .addTablePrefix("biz_");
 
                     builder.serviceBuilder()
