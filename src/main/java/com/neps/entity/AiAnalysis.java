@@ -51,6 +51,41 @@ public class AiAnalysis implements Serializable {
     private String failureReason;
 
     /**
+     * AI服务来源
+     */
+    private String provider;
+
+    /**
+     * 模型名称
+     */
+    private String modelName;
+
+    /**
+     * 本次分析使用的输入快照
+     */
+    private String inputSnapshot;
+
+    /**
+     * 是否为演示结果
+     */
+    private Byte isDemo;
+
+    /**
+     * 尝试次数
+     */
+    private Integer attemptCount;
+
+    /**
+     * 开始分析时间
+     */
+    private LocalDateTime startedAt;
+
+    /**
+     * 完成分析时间
+     */
+    private LocalDateTime completedAt;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;
@@ -122,6 +157,62 @@ public class AiAnalysis implements Serializable {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+    }
+
+    public String getModelName() {
+        return modelName;
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName;
+    }
+
+    public String getInputSnapshot() {
+        return inputSnapshot;
+    }
+
+    public void setInputSnapshot(String inputSnapshot) {
+        this.inputSnapshot = inputSnapshot;
+    }
+
+    public Byte getIsDemo() {
+        return isDemo;
+    }
+
+    public void setIsDemo(Byte isDemo) {
+        this.isDemo = isDemo;
+    }
+
+    public Integer getAttemptCount() {
+        return attemptCount;
+    }
+
+    public void setAttemptCount(Integer attemptCount) {
+        this.attemptCount = attemptCount;
+    }
+
+    public LocalDateTime getStartedAt() {
+        return startedAt;
+    }
+
+    public void setStartedAt(LocalDateTime startedAt) {
+        this.startedAt = startedAt;
+    }
+
+    public LocalDateTime getCompletedAt() {
+        return completedAt;
+    }
+
+    public void setCompletedAt(LocalDateTime completedAt) {
+        this.completedAt = completedAt;
     }
 
     @Override

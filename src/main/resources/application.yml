@@ -33,3 +33,10 @@ app:
     high-duplicate-feedback-count: 5
     rule-version: DEMO-RULE-1
 
+    ai:
+      mode: ${AI_MODE:mock}
+      poll-delay-ms: ${AI_POLL_DELAY_MS:1000}
+
+    anomaly:
+      aqi-threshold: 100
+
