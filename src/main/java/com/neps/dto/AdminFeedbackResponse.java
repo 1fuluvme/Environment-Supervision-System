@@ -1,6 +1,7 @@
 package com.neps.dto;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 public record AdminFeedbackResponse(
         Long id,
@@ -11,6 +12,8 @@ public record AdminFeedbackResponse(
         String gridCode,
         String gridName,
         String address,
+        BigDecimal longitude,
+        BigDecimal latitude,
         LocalDateTime observedAt,
         String description,
         String status,

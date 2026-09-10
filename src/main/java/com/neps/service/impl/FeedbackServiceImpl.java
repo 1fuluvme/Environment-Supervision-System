@@ -81,6 +81,14 @@ public class FeedbackServiceImpl
                     "网格不存在或已停用");
         }
 
+        if ((request.longitude() == null)
+                != (request.latitude() == null)) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "经度和纬度必须同时填写或同时不填写");
+        }
+
         Feedback feedback = new Feedback();
         feedback.setSubmitterId(submitter.getId());
         feedback.setGridId(grid.getId());
@@ -88,6 +96,8 @@ public class FeedbackServiceImpl
         feedback.setObservedAt(request.observedAt());
         feedback.setDescription(request.description().trim());
         feedback.setStatus("PENDING_ASSIGN");
+        feedback.setLongitude(request.longitude());
+        feedback.setLatitude(request.latitude());
 
         if (!save(feedback)) {
             throw new ResponseStatusException(
@@ -336,6 +346,8 @@ public class FeedbackServiceImpl
                 grid.getCode(),
                 grid.getName(),
                 feedback.getAddress(),
+                feedback.getLongitude(),
+                feedback.getLatitude(),
                 feedback.getObservedAt(),
                 feedback.getDescription(),
                 feedback.getStatus(),
@@ -365,6 +377,8 @@ public class FeedbackServiceImpl
                 feedback.getId(),
                 feedback.getGridId(),
                 feedback.getAddress(),
+                feedback.getLongitude(),
+                feedback.getLatitude(),
                 feedback.getObservedAt(),
                 feedback.getDescription(),
                 feedback.getStatus(),

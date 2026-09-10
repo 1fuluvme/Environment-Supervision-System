@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 /**
  * <p>
@@ -68,6 +69,25 @@ public class Feedback implements Serializable {
     /**
      * 更新时间
      */
+
+    private BigDecimal longitude;
+    private BigDecimal latitude;
+
+    public BigDecimal getLongitude() {
+        return longitude;
+    }
+
+    public void setLongitude(BigDecimal longitude) {
+        this.longitude = longitude;
+    }
+
+    public BigDecimal getLatitude() {
+        return latitude;
+    }
+
+    public void setLatitude(BigDecimal latitude) {
+        this.latitude = latitude;
+    }
     private LocalDateTime updatedAt;
 
     public Long getId() {
