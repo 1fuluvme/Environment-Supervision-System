@@ -3203,7 +3203,7 @@ public class AdminUserApiCheck {
         Map<String, Object> validWorkOrderResult =
                 Map.of(
                         "handledAt",
-                        LocalDateTime.now().toString(),
+                        assignedAt.toString(),
                         "measures",
                         "对现场污染源进行临时停运，并清理散落污染物。",
                         "result",
@@ -3537,7 +3537,7 @@ public class AdminUserApiCheck {
         Map<String, Object> supplementedWorkOrderResult =
                 Map.of(
                         "handledAt",
-                        LocalDateTime.now().toString(),
+                        assignedAt.toString(),
                         "measures",
                         "完成现场清理，并对污染点进行覆盖和隔离。",
                         "result",
@@ -3710,11 +3710,93 @@ public class AdminUserApiCheck {
                 workOrderAttachmentContentPath,
                 200);
 
-        awaitMockAnalysis("FEEDBACK", feedbackId);
-        awaitMockAnalysis("MEASUREMENT", measurementId);
+        awaitMockAnalysis("FEEDBACK", feedbackId, 1);
+        awaitMockAnalysis("MEASUREMENT", measurementId, 1);
 
         System.out.println(
                 "AI初判自动执行、结构化结果和唯一记录检查通过");
+
+        // =====================================================
+        // 管理员AI初判查询、失败提示和重试检查
+        // =====================================================
+
+        String adminAiPath = "/api/admin/ai-analyses";
+        long feedbackAnalysisId = findAnalysisId(
+                "FEEDBACK", feedbackId);
+
+        get(newClient(), adminAiPath, 401);
+        get(citizen, adminAiPath, 403);
+        get(firstAgain, adminAiPath, 403);
+        get(decisionAfterRemoval, adminAiPath, 403);
+
+        JsonNode feedbackAnalyses = get(
+                admin,
+                adminAiPath
+                        + "?targetType=FEEDBACK&status=SUCCEEDED",
+                200);
+
+        requireRecordId(
+                feedbackAnalyses,
+                feedbackAnalysisId,
+                true);
+
+        checkAiAnalysisResponse(
+                get(
+                        admin,
+                        adminAiPath + "/" + feedbackAnalysisId,
+                        200),
+                feedbackAnalysisId,
+                "FEEDBACK",
+                feedbackId,
+                "SUCCEEDED",
+                1);
+
+        get(admin, adminAiPath + "?targetType=UNKNOWN", 400);
+        get(admin, adminAiPath + "?status=UNKNOWN", 400);
+        get(admin, adminAiPath + "/0", 400);
+        get(
+                admin,
+                adminAiPath + "/9223372036854775807",
+                404);
+
+        String retryPath = adminAiPath
+                + "/" + feedbackAnalysisId + "/retry";
+
+        postJson(newClient(), retryPath, Map.of(), 401);
+        postJson(citizen, retryPath, Map.of(), 403);
+        postJson(firstAgain, retryPath, Map.of(), 403);
+        postJson(decisionAfterRemoval, retryPath, Map.of(), 403);
+        postJson(admin, retryPath, Map.of(), 409);
+
+        markAnalysisAsTimedOut(feedbackAnalysisId);
+
+        checkAiAnalysisResponse(
+                get(
+                        admin,
+                        adminAiPath + "/" + feedbackAnalysisId,
+                        200),
+                feedbackAnalysisId,
+                "FEEDBACK",
+                feedbackId,
+                "FAILED",
+                1);
+
+        postJson(admin, retryPath, Map.of(), 204);
+        awaitMockAnalysis("FEEDBACK", feedbackId, 2);
+
+        checkAiAnalysisResponse(
+                get(
+                        admin,
+                        adminAiPath + "/" + feedbackAnalysisId,
+                        200),
+                feedbackAnalysisId,
+                "FEEDBACK",
+                feedbackId,
+                "SUCCEEDED",
+                2);
+
+        System.out.println(
+                "AI初判查询、失败显示、权限和人工重试检查通过");
 
         System.out.println(
                 "工单退回、补充、关闭、附件和公众结果联动全部通过");
@@ -4366,7 +4448,8 @@ public class AdminUserApiCheck {
 
     private static void awaitMockAnalysis(
             String targetType,
-            long targetId) throws Exception {
+            long targetId,
+            int expectedAttemptCount) throws Exception {
 
         long deadline = System.nanoTime()
                 + Duration.ofSeconds(20).toNanos();
@@ -4416,7 +4499,8 @@ public class AdminUserApiCheck {
                                             "input_snapshot") == null
                                             || result.getInt("is_demo") != 1
                                             || result.getInt(
-                                            "attempt_count") != 1
+                                            "attempt_count")
+                                            != expectedAttemptCount
                                             || result.getTimestamp(
                                             "started_at") == null
                                             || result.getTimestamp(
@@ -4452,6 +4536,105 @@ public class AdminUserApiCheck {
                 "等待AI初判超时，targetType="
                         + targetType
                         + "，targetId=" + targetId);
+    }
+
+    private static long findAnalysisId(
+            String targetType,
+            long targetId) throws Exception {
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT id FROM biz_ai_analysis "
+                             + "WHERE target_type = ? AND target_id = ?")) {
+
+            statement.setString(1, targetType);
+            statement.setLong(2, targetId);
+
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalStateException(
+                            "找不到AI初判记录，targetType="
+                                    + targetType
+                                    + "，targetId=" + targetId);
+                }
+                return result.getLong("id");
+            }
+        }
+    }
+
+    private static void markAnalysisAsTimedOut(
+            long analysisId) throws Exception {
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE biz_ai_analysis SET status = 'FAILED', "
+                             + "failure_reason = '接口测试模拟AI服务超时', "
+                             + "completed_at = NOW(), updated_at = NOW() "
+                             + "WHERE id = ? AND status = 'SUCCEEDED'")) {
+
+            statement.setLong(1, analysisId);
+
+            if (statement.executeUpdate() != 1) {
+                throw new IllegalStateException(
+                        "无法构造AI初判失败记录，ID=" + analysisId);
+            }
+        }
+    }
+
+    private static void checkAiAnalysisResponse(
+            JsonNode analysis,
+            long expectedId,
+            String expectedTargetType,
+            long expectedTargetId,
+            String expectedStatus,
+            int expectedAttemptCount) throws Exception {
+
+        boolean commonInvalid =
+                analysis.path("id").asLong() != expectedId
+                        || !expectedTargetType.equals(
+                        analysis.path("targetType").asText())
+                        || analysis.path("targetId").asLong()
+                        != expectedTargetId
+                        || !expectedStatus.equals(
+                        analysis.path("status").asText())
+                        || analysis.path("attemptCount").asInt()
+                        != expectedAttemptCount
+                        || !analysis.path("createdAt").isTextual()
+                        || !analysis.path("updatedAt").isTextual();
+
+        if (commonInvalid) {
+            throw new IllegalStateException(
+                    "AI初判响应基础字段不符合预期：" + analysis);
+        }
+
+        if ("FAILED".equals(expectedStatus)) {
+            if (!analysis.path("failureReason").asText()
+                    .contains("模拟AI服务超时")) {
+                throw new IllegalStateException(
+                        "AI失败原因未正确返回：" + analysis);
+            }
+            return;
+        }
+
+        JsonNode result = JSON.readTree(
+                analysis.path("resultText").asText());
+
+        if (!"MOCK".equals(analysis.path("provider").asText())
+                || !"LOCAL-DEMO".equals(
+                analysis.path("modelName").asText())
+                || !analysis.path("demo").asBoolean()
+                || !analysis.path("startedAt").isTextual()
+                || !analysis.path("completedAt").isTextual()
+                || analysis.path("inputSnapshot").asText().isBlank()
+                || result.path("summary").asText().isBlank()
+                || result.path("suspectedPhenomenon")
+                .asText().isBlank()
+                || !result.path("checkItems").isArray()
+                || result.path("checkItems").isEmpty()) {
+
+            throw new IllegalStateException(
+                    "AI成功结果不符合预期：" + analysis);
+        }
     }
 
     private record AssignedCase(
