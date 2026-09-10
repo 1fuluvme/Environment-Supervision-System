@@ -5234,8 +5234,8 @@ public class AdminUserApiCheck {
     private static byte[] createTestPng() throws Exception {
         BufferedImage image =
                 new BufferedImage(
-                        2,
-                        2,
+                        32,
+                        32,
                         BufferedImage.TYPE_INT_RGB);
 
         image.setRGB(0, 0, 0x00FF0000);

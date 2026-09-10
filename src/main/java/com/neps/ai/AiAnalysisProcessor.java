@@ -16,7 +16,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.util.Locale;
+
+import com.neps.entity.Attachment;
+import com.neps.mapper.AttachmentMapper;
+
+import java.util.List;
 
 @Component
 public class AiAnalysisProcessor {
@@ -25,6 +29,8 @@ public class AiAnalysisProcessor {
     private final FeedbackMapper feedbackMapper;
     private final MeasurementMapper measurementMapper;
     private final ObjectMapper objectMapper;
+    private final AttachmentMapper attachmentMapper;
+    private final QwenAiClient qwenAiClient;
 
     @Value("${app.ai.mode:mock}")
     private String mode;
@@ -33,11 +39,15 @@ public class AiAnalysisProcessor {
             AiAnalysisMapper aiAnalysisMapper,
             FeedbackMapper feedbackMapper,
             MeasurementMapper measurementMapper,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            QwenAiClient qwenAiClient,
+            AttachmentMapper attachmentMapper) {
 
         this.aiAnalysisMapper = aiAnalysisMapper;
         this.feedbackMapper = feedbackMapper;
         this.measurementMapper = measurementMapper;
+        this.attachmentMapper = attachmentMapper;
+        this.qwenAiClient = qwenAiClient;
         this.objectMapper = objectMapper;
     }
 
@@ -59,7 +69,12 @@ public class AiAnalysisProcessor {
     public void processPendingBatch() {
 
         // 单机演示一次最多处理50条，防止历史待处理记录阻塞测试。
-        for (int i = 0; i < 50; i++) {
+        int batchSize =
+                "mock".equalsIgnoreCase(mode)
+                        ? 50
+                        : 1;
+
+        for (int i = 0; i < batchSize; i++) {
             if (!processOne()) {
                 return;
             }
@@ -67,11 +82,24 @@ public class AiAnalysisProcessor {
     }
 
     private boolean processOne() {
-        AiAnalysis analysis = aiAnalysisMapper.selectOne(
+        var pendingQuery =
                 Wrappers.<AiAnalysis>lambdaQuery()
                         .eq(AiAnalysis::getStatus, "PENDING")
                         .orderByAsc(AiAnalysis::getId)
-                        .last("LIMIT 1"));
+                        .last("LIMIT 1");
+
+        if ("qwen".equalsIgnoreCase(mode)) {
+            /*
+             * 反馈先创建、图片随后上传。
+             * 真实模式等待5秒，给图片上传留出时间。
+             */
+            pendingQuery.le(
+                    AiAnalysis::getCreatedAt,
+                    LocalDateTime.now().minusSeconds(5));
+        }
+
+        AiAnalysis analysis =
+                aiAnalysisMapper.selectOne(pendingQuery);
 
         if (analysis == null) {
             return false;
@@ -102,18 +130,58 @@ public class AiAnalysisProcessor {
                         : analysis.getAttemptCount() + 1);
 
         try {
-            if (!"mock".equalsIgnoreCase(mode)) {
+            /*
+             * 先复用现有方法生成统一的业务输入快照。
+             * Mock使用本地结果，Qwen把同一份输入发给真实模型。
+             */
+            MockResult prepared =
+                    analyzeWithMock(analysis);
+
+            if ("mock".equalsIgnoreCase(mode)) {
+                analysis.setProvider("MOCK");
+                analysis.setModelName("LOCAL-DEMO");
+                analysis.setInputSnapshot(
+                        prepared.inputSnapshot());
+                analysis.setResultText(
+                        prepared.resultText());
+                analysis.setIsDemo((byte) 1);
+            } else if ("qwen".equalsIgnoreCase(mode)) {
+                List<Attachment> attachments =
+                        findAnalysisImages(analysis);
+
+                ObjectNode inputSnapshot =
+                        (ObjectNode) objectMapper.readTree(
+                                prepared.inputSnapshot());
+
+                /*
+                 * 记录本次选择了多少张图片，方便演示和测试核对。
+                 * 保存的是数量，不保存图片Base64。
+                 */
+                inputSnapshot.put(
+                        "attachmentCount",
+                        attachments.size());
+
+                String inputText =
+                        objectMapper.writeValueAsString(
+                                inputSnapshot);
+
+                analysis.setProvider("QWEN");
+                analysis.setModelName(
+                        qwenAiClient.modelName());
+                analysis.setInputSnapshot(inputText);
+                analysis.setIsDemo((byte) 0);
+
+                String realResult =
+                        qwenAiClient.analyze(
+                                inputText,
+                                attachments);
+
+                analysis.setResultText(realResult);
+            } else {
                 throw new IllegalStateException(
-                        "AI服务未配置，当前模式：" + mode);
+                        "不支持的AI运行模式：" + mode);
             }
 
-            MockResult result = analyzeWithMock(analysis);
-
-            analysis.setProvider("MOCK");
-            analysis.setModelName("LOCAL-DEMO");
-            analysis.setInputSnapshot(result.inputSnapshot());
-            analysis.setResultText(result.resultText());
-            analysis.setIsDemo((byte) 1);
             analysis.setStatus("SUCCEEDED");
             analysis.setFailureReason(null);
         } catch (Exception exception) {
@@ -237,6 +305,30 @@ public class AiAnalysisProcessor {
         return new MockResult(
                 objectMapper.writeValueAsString(input),
                 objectMapper.writeValueAsString(output));
+    }
+
+    private List<Attachment> findAnalysisImages(
+            AiAnalysis analysis) {
+
+        /*
+         * 当前系统已经实现反馈图片。
+         * 检测记录暂时没有独立图片上传接口。
+         */
+        if (!"FEEDBACK".equals(
+                analysis.getTargetType())) {
+
+            return List.of();
+        }
+
+        return attachmentMapper.selectList(
+                Wrappers.<Attachment>lambdaQuery()
+                        .eq(
+                                Attachment::getBusinessType,
+                                "FEEDBACK")
+                        .eq(
+                                Attachment::getBusinessId,
+                                analysis.getTargetId())
+                        .orderByAsc(Attachment::getId));
     }
 
     private String truncate(String value, int maximumLength) {

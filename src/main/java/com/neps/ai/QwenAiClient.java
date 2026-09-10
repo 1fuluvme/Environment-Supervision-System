@@ -135,10 +135,11 @@ public class QwenAiClient {
         if (response.statusCode() < 200
                 || response.statusCode() >= 300) {
 
-            // 不输出请求头，避免API Key进入控制台。
             throw new IllegalStateException(
                     "AI服务返回HTTP "
-                            + response.statusCode());
+                            + response.statusCode()
+                            + "："
+                            + safeErrorDetail(response.body()));
         }
 
         JsonNode responseBody =
@@ -264,6 +265,41 @@ public class QwenAiClient {
 
             throw new IllegalStateException(
                     "AI超时时间必须在1至180秒之间");
+        }
+    }
+
+    private String safeErrorDetail(String responseBody) {
+        try {
+            JsonNode body =
+                    objectMapper.readTree(responseBody);
+
+            JsonNode error = body.path("error");
+
+            String code =
+                    error.path("code").asText();
+
+            String message =
+                    error.path("message").asText();
+
+            String detail =
+                    (code.isBlank() ? "" : code + "，")
+                            + (message.isBlank()
+                            ? "未返回错误说明"
+                            : message);
+
+            /*
+             * 双重保护：即使服务意外回显密钥，
+             * 也不能让它进入数据库和控制台。
+             */
+            if (!apiKey.isBlank()) {
+                detail = detail.replace(apiKey, "***");
+            }
+
+            return detail.length() <= 300
+                    ? detail
+                    : detail.substring(0, 300);
+        } catch (Exception exception) {
+            return "未返回可解析的错误说明";
         }
     }
 
