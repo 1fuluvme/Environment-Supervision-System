@@ -16,5 +16,12 @@ public interface AttachmentService extends IService<Attachment> {
 
     List<AttachmentResponse> listFeedbackImages(Long feedbackId);
 
-    AttachmentContent getFeedbackImage(Long attachmentId);
+    AttachmentContent getImage(Long attachmentId);
+
+    AttachmentResponse uploadWorkOrderImage(
+            Long workOrderId,
+            MultipartFile file);
+
+    List<AttachmentResponse> listWorkOrderImages(
+            Long workOrderId);
 }

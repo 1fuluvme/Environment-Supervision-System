@@ -39,6 +39,8 @@ import com.neps.entity.InspectionTask;
 import com.neps.mapper.GridMapper;
 import com.neps.mapper.InspectionTaskMapper;
 import com.neps.mapper.UserRegionMapper;
+import com.neps.entity.WorkOrder;
+import com.neps.mapper.WorkOrderMapper;
 
 @Service
 public class AttachmentServiceImpl
@@ -57,6 +59,7 @@ public class AttachmentServiceImpl
     private final InspectionTaskMapper inspectionTaskMapper;
     private final UserRegionMapper userRegionMapper;
     private final Path uploadRoot;
+    private final WorkOrderMapper workOrderMapper;
 
     public AttachmentServiceImpl(
             UserMapper userMapper,
@@ -64,6 +67,7 @@ public class AttachmentServiceImpl
             GridMapper gridMapper,
             InspectionTaskMapper inspectionTaskMapper,
             UserRegionMapper userRegionMapper,
+            WorkOrderMapper workOrderMapper,
             @Value("${app.upload.directory}")
             String uploadDirectory) {
 
@@ -72,6 +76,7 @@ public class AttachmentServiceImpl
         this.gridMapper = gridMapper;
         this.inspectionTaskMapper = inspectionTaskMapper;
         this.userRegionMapper = userRegionMapper;
+        this.workOrderMapper = workOrderMapper;
 
         this.uploadRoot = Path.of(uploadDirectory)
                 .toAbsolutePath()
@@ -102,68 +107,12 @@ public class AttachmentServiceImpl
                     "反馈已进入办理流程，不能继续添加图片");
         }
 
-        if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "请选择图片文件");
-        }
-
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new ResponseStatusException(
-                    HttpStatus.PAYLOAD_TOO_LARGE,
-                    "图片不能超过5MB");
-        }
-
-        String originalName =
-                cleanOriginalName(file.getOriginalFilename());
-
-        ImageType imageType = detectImageType(file);
-
-        String relativePath =
-                "feedback/" + UUID.randomUUID()
-                        + imageType.extension();
-
-        Path destination = resolveStoragePath(relativePath);
-
-        try {
-            Files.createDirectories(destination.getParent());
-
-            try (InputStream input = file.getInputStream()) {
-                Files.copy(input, destination);
-            }
-        } catch (IOException exception) {
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "图片保存失败",
-                    exception);
-        }
-
-        Attachment attachment = new Attachment();
-        attachment.setBusinessType("FEEDBACK");
-        attachment.setBusinessId(feedback.getId());
-        attachment.setUploaderId(user.getId());
-        attachment.setOriginalName(originalName);
-        attachment.setStoragePath(relativePath);
-        attachment.setContentType(imageType.contentType());
-        attachment.setSizeBytes(file.getSize());
-
-        try {
-            if (!save(attachment)) {
-                throw new ResponseStatusException(
-                        HttpStatus.INTERNAL_SERVER_ERROR,
-                        "附件记录保存失败");
-            }
-
-            return toResponse(getById(attachment.getId()));
-        } catch (RuntimeException exception) {
-            try {
-                Files.deleteIfExists(destination);
-            } catch (IOException deleteException) {
-                exception.addSuppressed(deleteException);
-            }
-
-            throw exception;
-        }
+        return storeImage(
+                "FEEDBACK",
+                feedback.getId(),
+                user,
+                "feedback",
+                file);
     }
 
     @Override
@@ -189,7 +138,7 @@ public class AttachmentServiceImpl
     @Override
     @PreAuthorize(
             "hasAnyRole('PUBLIC','ADMIN','GRID')")
-    public AttachmentContent getFeedbackImage(
+    public AttachmentContent getImage(
             Long attachmentId) {
 
         if (attachmentId == null || attachmentId <= 0) {
@@ -200,10 +149,7 @@ public class AttachmentServiceImpl
 
         User user = currentUser();
 
-        Attachment attachment = lambdaQuery()
-                .eq(Attachment::getId, attachmentId)
-                .eq(Attachment::getBusinessType, "FEEDBACK")
-                .one();
+        Attachment attachment = getById(attachmentId);
 
         if (attachment == null) {
             throw new ResponseStatusException(
@@ -211,9 +157,21 @@ public class AttachmentServiceImpl
                     "附件不存在");
         }
 
-        requireReadableFeedback(
-                attachment.getBusinessId(),
-                user);
+        switch (attachment.getBusinessType()) {
+            case "FEEDBACK" ->
+                    requireReadableFeedback(
+                            attachment.getBusinessId(),
+                            user);
+
+            case "WORK_ORDER" ->
+                    requireReadableWorkOrder(
+                            attachment.getBusinessId(),
+                            user);
+
+            default -> throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "附件不存在");
+        }
 
         Path path = resolveStoragePath(
                 attachment.getStoragePath());
@@ -238,6 +196,203 @@ public class AttachmentServiceImpl
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "附件读取失败",
                     exception);
+        }
+    }
+
+    @Override
+    @Transactional
+    @PreAuthorize("hasRole('GRID')")
+    public AttachmentResponse uploadWorkOrderImage(
+            Long workOrderId,
+            MultipartFile file) {
+
+        User worker = currentUser();
+
+        WorkOrder order =
+                requireReadableWorkOrder(
+                        workOrderId,
+                        worker);
+
+        if (!"PENDING".equals(order.getStatus())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "只有待处理工单可以上传处置图片");
+        }
+
+        return storeImage(
+                "WORK_ORDER",
+                order.getId(),
+                worker,
+                "work-order",
+                file);
+    }
+
+    @Override
+    @PreAuthorize("hasAnyRole('ADMIN','GRID')")
+    public List<AttachmentResponse> listWorkOrderImages(
+            Long workOrderId) {
+
+        User user = currentUser();
+
+        WorkOrder order =
+                requireReadableWorkOrder(
+                        workOrderId,
+                        user);
+
+        return lambdaQuery()
+                .eq(
+                        Attachment::getBusinessType,
+                        "WORK_ORDER")
+                .eq(
+                        Attachment::getBusinessId,
+                        order.getId())
+                .orderByAsc(Attachment::getId)
+                .list()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    private WorkOrder requireReadableWorkOrder(
+            Long workOrderId,
+            User user) {
+
+        if (workOrderId == null
+                || workOrderId <= 0) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "工单ID必须是正整数");
+        }
+
+        WorkOrder order =
+                workOrderMapper.selectById(
+                        workOrderId);
+
+        if (order == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "处置工单不存在");
+        }
+
+        switch (user.getRole()) {
+            case "GRID" -> {
+                if (!user.getId().equals(
+                        order.getAssigneeId())) {
+
+                    throw new ResponseStatusException(
+                            HttpStatus.NOT_FOUND,
+                            "处置工单不存在");
+                }
+            }
+
+            case "ADMIN" -> {
+                Grid grid =
+                        gridMapper.selectById(
+                                order.getGridId());
+
+                if (grid == null) {
+                    throw new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "工单关联的网格不存在");
+                }
+
+                if (userRegionMapper.countAccessibleRegion(
+                        user.getId(),
+                        grid.getRegionId()) == 0) {
+
+                    throw new ResponseStatusException(
+                            HttpStatus.FORBIDDEN,
+                            "工单不在当前管理员授权范围内");
+                }
+            }
+
+            default -> throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "当前角色不能读取工单附件");
+        }
+
+        return order;
+    }
+
+    private AttachmentResponse storeImage(
+            String businessType,
+            Long businessId,
+            User uploader,
+            String directory,
+            MultipartFile file) {
+
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "请选择图片文件");
+        }
+
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new ResponseStatusException(
+                    HttpStatus.PAYLOAD_TOO_LARGE,
+                    "图片不能超过5MB");
+        }
+
+        String originalName =
+                cleanOriginalName(
+                        file.getOriginalFilename());
+
+        ImageType imageType =
+                detectImageType(file);
+
+        String relativePath =
+                directory
+                        + "/"
+                        + UUID.randomUUID()
+                        + imageType.extension();
+
+        Path destination =
+                resolveStoragePath(relativePath);
+
+        try {
+            Files.createDirectories(
+                    destination.getParent());
+
+            try (InputStream input =
+                         file.getInputStream()) {
+
+                Files.copy(input, destination);
+            }
+        } catch (IOException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "图片保存失败",
+                    exception);
+        }
+
+        Attachment attachment = new Attachment();
+        attachment.setBusinessType(businessType);
+        attachment.setBusinessId(businessId);
+        attachment.setUploaderId(uploader.getId());
+        attachment.setOriginalName(originalName);
+        attachment.setStoragePath(relativePath);
+        attachment.setContentType(
+                imageType.contentType());
+        attachment.setSizeBytes(file.getSize());
+
+        try {
+            if (!save(attachment)) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "附件记录保存失败");
+            }
+
+            return toResponse(
+                    getById(attachment.getId()));
+        } catch (RuntimeException exception) {
+            try {
+                Files.deleteIfExists(destination);
+            } catch (IOException deleteException) {
+                exception.addSuppressed(deleteException);
+            }
+
+            throw exception;
         }
     }
 

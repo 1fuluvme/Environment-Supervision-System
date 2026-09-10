@@ -1281,7 +1281,7 @@ public class AdminUserApiCheck {
                         adminFeedbackDetail
                                 .path("status")
                                 .asText())
-                        || !"PENDING".equals(
+                        || !isAnalysisLifecycleStatus(
                         adminFeedbackDetail
                                 .path("analysisStatus")
                                 .asText())
@@ -2615,6 +2615,76 @@ public class AdminUserApiCheck {
         }
 
         // =====================================================
+        // 管理员内部预警查询检查
+        // =====================================================
+
+        long warningId =
+                findWarningId(highAqiEventId);
+
+        String adminWarningPath =
+                "/api/admin/warnings";
+
+        String warningDetailPath =
+                adminWarningPath + "/" + warningId;
+
+        get(newClient(), adminWarningPath, 401);
+        get(citizen, adminWarningPath, 403);
+        get(secondClient, adminWarningPath, 403);
+        get(decisionAfterRemoval, adminWarningPath, 403);
+
+        JsonNode activeWarnings = get(
+                admin,
+                adminWarningPath + "?status=ACTIVE",
+                200);
+
+        requireRecordId(
+                activeWarnings,
+                warningId,
+                true);
+
+        JsonNode mediumWarnings = get(
+                admin,
+                adminWarningPath + "?level=MEDIUM",
+                200);
+
+        requireRecordId(
+                mediumWarnings,
+                warningId,
+                true);
+
+        get(
+                admin,
+                adminWarningPath + "?status=UNKNOWN",
+                400);
+
+        get(
+                admin,
+                adminWarningPath + "?level=URGENT",
+                400);
+
+        get(newClient(), warningDetailPath, 401);
+        get(citizen, warningDetailPath, 403);
+        get(secondClient, warningDetailPath, 403);
+        get(decisionAfterRemoval, warningDetailPath, 403);
+
+        checkWarningResponse(
+                get(admin, warningDetailPath, 200),
+                warningId,
+                highAqiEventId,
+                childGridId,
+                "ACTIVE",
+                false);
+
+        get(admin, adminWarningPath + "/0", 400);
+        get(
+                admin,
+                adminWarningPath + "/" + Long.MAX_VALUE,
+                404);
+
+        System.out.println(
+                "内部预警查询、筛选和角色权限检查通过");
+
+        // =====================================================
         // 管理员处置工单查询与指派检查
         // =====================================================
 
@@ -2860,6 +2930,91 @@ public class AdminUserApiCheck {
                 secondPhone,
                 DEMO_PASSWORD);
 
+        // =====================================================
+        // 网格员统一任务列表检查
+        // =====================================================
+
+        String unifiedTaskPath =
+                "/api/grid/tasks";
+
+        get(newClient(), unifiedTaskPath, 401);
+        get(citizen, unifiedTaskPath, 403);
+        get(admin, unifiedTaskPath, 403);
+        get(decisionAfterRemoval, unifiedTaskPath, 403);
+
+        JsonNode unifiedTasks = get(
+                workOrderWorker,
+                unifiedTaskPath,
+                200);
+
+        requireUnifiedTask(
+                unifiedTasks,
+                "INSPECTION",
+                highAqiCase.taskId(),
+                "COMPLETED",
+                true);
+
+        requireUnifiedTask(
+                unifiedTasks,
+                "DISPOSAL",
+                workOrderId,
+                "PENDING",
+                true);
+
+        // 第一名网格员不能看到第二名网格员的处置工单。
+        requireUnifiedTask(
+                get(firstAgain, unifiedTaskPath, 200),
+                "DISPOSAL",
+                workOrderId,
+                "PENDING",
+                false);
+
+        JsonNode inspectionOnlyTasks = get(
+                workOrderWorker,
+                unifiedTaskPath
+                        + "?taskType=INSPECTION",
+                200);
+
+        requireUnifiedTask(
+                inspectionOnlyTasks,
+                "INSPECTION",
+                highAqiCase.taskId(),
+                "COMPLETED",
+                true);
+
+        requireUnifiedTask(
+                inspectionOnlyTasks,
+                "DISPOSAL",
+                workOrderId,
+                "PENDING",
+                false);
+
+        JsonNode pendingDisposalTasks = get(
+                workOrderWorker,
+                unifiedTaskPath
+                        + "?taskType=DISPOSAL&status=PENDING",
+                200);
+
+        requireUnifiedTask(
+                pendingDisposalTasks,
+                "DISPOSAL",
+                workOrderId,
+                "PENDING",
+                true);
+
+        get(
+                workOrderWorker,
+                unifiedTaskPath + "?taskType=UNKNOWN",
+                400);
+
+        get(
+                workOrderWorker,
+                unifiedTaskPath + "?status=UNKNOWN",
+                400);
+
+        System.out.println(
+                "统一任务列表、类型筛选和数据隔离检查通过");
+
         String workerWorkOrderPath =
                 "/api/grid/work-orders";
 
@@ -2915,6 +3070,126 @@ public class AdminUserApiCheck {
                 "PENDING",
                 secondId,
                 "尽快到现场采取污染控制措施");
+
+        // 三、工单图片权限、上传、列表和下载检查。
+        String workOrderAttachmentPath =
+                workerOrderDetailPath + "/attachments";
+
+        postMultipart(
+                newClient(),
+                workOrderAttachmentPath,
+                "disposal.png",
+                "image/png",
+                testPng,
+                401);
+
+        postMultipart(
+                citizen,
+                workOrderAttachmentPath,
+                "disposal.png",
+                "image/png",
+                testPng,
+                403);
+
+        postMultipart(
+                admin,
+                workOrderAttachmentPath,
+                "disposal.png",
+                "image/png",
+                testPng,
+                403);
+
+        postMultipart(
+                firstAgain,
+                workOrderAttachmentPath,
+                "disposal.png",
+                "image/png",
+                testPng,
+                404);
+
+        get(newClient(), workOrderAttachmentPath, 401);
+        get(citizen, workOrderAttachmentPath, 403);
+        get(decisionAfterRemoval, workOrderAttachmentPath, 403);
+        get(firstAgain, workOrderAttachmentPath, 404);
+
+        if (get(workOrderWorker, workOrderAttachmentPath, 200)
+                .size() != 0
+                || get(admin, workOrderAttachmentPath, 200)
+                .size() != 0) {
+
+            throw new IllegalStateException(
+                    "上传前工单附件列表应为空");
+        }
+
+        JsonNode workOrderAttachment = postMultipart(
+                workOrderWorker,
+                workOrderAttachmentPath,
+                "disposal.png",
+                "image/png",
+                testPng,
+                201);
+
+        long workOrderAttachmentId =
+                workOrderAttachment.path("id").asLong();
+
+        if (workOrderAttachmentId <= 0
+                || !"image/png".equals(
+                workOrderAttachment.path("contentType").asText())) {
+
+            throw new IllegalStateException(
+                    "工单附件上传响应不正确："
+                            + workOrderAttachment);
+        }
+
+        requireRecordId(
+                get(
+                        workOrderWorker,
+                        workOrderAttachmentPath,
+                        200),
+                workOrderAttachmentId,
+                true);
+
+        requireRecordId(
+                get(admin, workOrderAttachmentPath, 200),
+                workOrderAttachmentId,
+                true);
+
+        String workOrderAttachmentContentPath =
+                "/api/attachments/"
+                        + workOrderAttachmentId
+                        + "/content";
+
+        if (!Arrays.equals(
+                testPng,
+                getBytes(
+                        workOrderWorker,
+                        workOrderAttachmentContentPath,
+                        200))
+                || !Arrays.equals(
+                testPng,
+                getBytes(
+                        admin,
+                        workOrderAttachmentContentPath,
+                        200))) {
+
+            throw new IllegalStateException(
+                    "下载的工单图片与上传内容不一致");
+        }
+
+        getBytes(
+                firstAgain,
+                workOrderAttachmentContentPath,
+                404);
+
+        getBytes(
+                citizen,
+                workOrderAttachmentContentPath,
+                403);
+
+        getBytes(
+                decisionAfterRemoval,
+                workOrderAttachmentContentPath,
+                403);
 
         get(workOrderWorker, workerWorkOrderPath + "/0", 400);
         get(
@@ -3050,6 +3325,15 @@ public class AdminUserApiCheck {
                             + submittedOrder);
         }
 
+        // 提交处置结果后不能继续补传图片。
+        postMultipart(
+                workOrderWorker,
+                workOrderAttachmentPath,
+                "late.png",
+                "image/png",
+                testPng,
+                409);
+
         // 同一张待复核工单不能重复提交。
         postJson(
                 workOrderWorker,
@@ -3066,6 +3350,18 @@ public class AdminUserApiCheck {
         requireRecordId(
                 pendingReviewOrders,
                 workOrderId,
+                true);
+
+        requireUnifiedTask(
+                get(
+                        workOrderWorker,
+                        unifiedTaskPath
+                                + "?taskType=DISPOSAL"
+                                + "&status=PENDING_REVIEW",
+                        200),
+                "DISPOSAL",
+                workOrderId,
+                "PENDING_REVIEW",
                 true);
 
         JsonNode noLongerPendingOrders = get(
@@ -3327,6 +3623,18 @@ public class AdminUserApiCheck {
                 workOrderId,
                 true);
 
+        requireUnifiedTask(
+                get(
+                        workOrderWorker,
+                        unifiedTaskPath
+                                + "?taskType=DISPOSAL"
+                                + "&status=CLOSED",
+                        200),
+                "DISPOSAL",
+                workOrderId,
+                "CLOSED",
+                true);
+
         checkAnomalyResponse(
                 get(
                         admin,
@@ -3373,8 +3681,43 @@ public class AdminUserApiCheck {
         checkClosedWarning(highAqiEventId);
         checkWorkOrderReviewHistory(workOrderId);
 
+        checkWarningResponse(
+                get(admin, warningDetailPath, 200),
+                warningId,
+                highAqiEventId,
+                childGridId,
+                "CLOSED",
+                true);
+
+        JsonNode closedWarnings = get(
+                admin,
+                adminWarningPath + "?status=CLOSED&level=MEDIUM",
+                200);
+
+        requireRecordId(
+                closedWarnings,
+                warningId,
+                true);
+
+        // 工单关闭后，历史图片仍可查看。
+        requireRecordId(
+                get(admin, workOrderAttachmentPath, 200),
+                workOrderAttachmentId,
+                true);
+
+        getBytes(
+                workOrderWorker,
+                workOrderAttachmentContentPath,
+                200);
+
+        awaitMockAnalysis("FEEDBACK", feedbackId);
+        awaitMockAnalysis("MEASUREMENT", measurementId);
+
         System.out.println(
-                "工单退回、补充、关闭和公众结果联动全部通过");
+                "AI初判自动执行、结构化结果和唯一记录检查通过");
+
+        System.out.println(
+                "工单退回、补充、关闭、附件和公众结果联动全部通过");
 
         System.out.println(
                 "异常事件查询、确认、排除和状态联动全部通过");
@@ -3726,6 +4069,131 @@ public class AdminUserApiCheck {
         }
     }
 
+    private static long findWarningId(
+            long anomalyEventId) throws Exception {
+
+        try (Connection connection = testDatabaseConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT id FROM biz_warning "
+                             + "WHERE anomaly_event_id = ?")) {
+
+            statement.setLong(1, anomalyEventId);
+
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    throw new IllegalStateException(
+                            "已确认异常没有生成内部预警，anomalyEventId="
+                                    + anomalyEventId);
+                }
+                return result.getLong("id");
+            }
+        }
+    }
+
+    private static void checkWarningResponse(
+            JsonNode warning,
+            long expectedWarningId,
+            long expectedAnomalyEventId,
+            long expectedGridId,
+            String expectedStatus,
+            boolean shouldBeClosed) {
+
+        boolean closedAtInvalid = shouldBeClosed
+                ? !warning.path("closedAt").isTextual()
+                : !warning.path("closedAt").isNull();
+
+        if (warning.path("id").asLong()
+                != expectedWarningId
+                || warning.path("anomalyEventId").asLong()
+                != expectedAnomalyEventId
+                || warning.path("gridId").asLong()
+                != expectedGridId
+                || !"MEDIUM".equals(
+                warning.path("warningLevel").asText())
+                || !expectedStatus.equals(
+                warning.path("status").asText())
+                || !"污染异常预警".equals(
+                warning.path("title").asText())
+                || !warning.path("content").isTextual()
+                || closedAtInvalid) {
+
+            throw new IllegalStateException(
+                    "内部预警响应不符合预期："
+                            + warning);
+        }
+    }
+
+    private static void requireUnifiedTask(
+            JsonNode tasks,
+            String expectedType,
+            long expectedId,
+            String expectedStatus,
+            boolean shouldExist) {
+
+        if (!tasks.isArray()) {
+            throw new IllegalStateException(
+                    "统一任务响应不是数组：" + tasks);
+        }
+
+        JsonNode matched = null;
+
+        for (JsonNode task : tasks) {
+            if (expectedType.equals(
+                    task.path("taskType").asText())
+                    && task.path("id").asLong()
+                    == expectedId) {
+
+                matched = task;
+                break;
+            }
+        }
+
+        if (!shouldExist) {
+            if (matched != null) {
+                throw new IllegalStateException(
+                        "统一任务中不应出现该记录："
+                                + matched);
+            }
+            return;
+        }
+
+        if (matched == null
+                || !expectedStatus.equals(
+                matched.path("status").asText())
+                || matched.path("feedbackId").asLong() <= 0
+                || matched.path("gridId").asLong() <= 0
+                || !matched.path("address").isTextual()
+                || !matched.path("description").isTextual()
+                || !matched.path("requirement").isTextual()
+                || !matched.path("priority").isTextual()
+                || !matched.path("assignedAt").isTextual()) {
+
+            throw new IllegalStateException(
+                    "统一任务记录不符合预期，type="
+                            + expectedType
+                            + "，id="
+                            + expectedId
+                            + "，响应="
+                            + tasks);
+        }
+
+        if ("INSPECTION".equals(expectedType)
+                && !matched.path("anomalyEventId").isNull()) {
+
+            throw new IllegalStateException(
+                    "核查任务不应关联异常事件："
+                            + matched);
+        }
+
+        if ("DISPOSAL".equals(expectedType)
+                && matched.path("anomalyEventId").asLong() <= 0) {
+
+            throw new IllegalStateException(
+                    "处置工单缺少异常事件ID："
+                            + matched);
+        }
+    }
+
     private static void checkWorkOrderResponse(
             JsonNode order,
             long expectedOrderId,
@@ -3885,6 +4353,105 @@ public class AdminUserApiCheck {
                 url,
                 env("DB_USERNAME"),
                 env("DB_PASSWORD"));
+    }
+
+    private static boolean isAnalysisLifecycleStatus(
+            String status) {
+
+        return "PENDING".equals(status)
+                || "RUNNING".equals(status)
+                || "SUCCEEDED".equals(status)
+                || "FAILED".equals(status);
+    }
+
+    private static void awaitMockAnalysis(
+            String targetType,
+            long targetId) throws Exception {
+
+        long deadline = System.nanoTime()
+                + Duration.ofSeconds(20).toNanos();
+
+        while (System.nanoTime() < deadline) {
+            try (Connection connection = testDatabaseConnection();
+                 PreparedStatement statement = connection.prepareStatement(
+                         "SELECT status, provider, model_name, "
+                                 + "input_snapshot, result_text, "
+                                 + "failure_reason, is_demo, attempt_count, "
+                                 + "started_at, completed_at, "
+                                 + "(SELECT COUNT(*) FROM biz_ai_analysis "
+                                 + "WHERE target_type = ? AND target_id = ?) "
+                                 + "AS record_count "
+                                 + "FROM biz_ai_analysis "
+                                 + "WHERE target_type = ? AND target_id = ?")) {
+
+                statement.setString(1, targetType);
+                statement.setLong(2, targetId);
+                statement.setString(3, targetType);
+                statement.setLong(4, targetId);
+
+                try (ResultSet result = statement.executeQuery()) {
+                    if (result.next()) {
+                        String status = result.getString("status");
+
+                        if ("FAILED".equals(status)) {
+                            throw new IllegalStateException(
+                                    "AI初判失败，targetType="
+                                            + targetType
+                                            + "，targetId=" + targetId
+                                            + "，原因="
+                                            + result.getString(
+                                            "failure_reason"));
+                        }
+
+                        if ("SUCCEEDED".equals(status)) {
+                            JsonNode analysis = JSON.readTree(
+                                    result.getString("result_text"));
+
+                            boolean invalid =
+                                    !"MOCK".equals(
+                                            result.getString("provider"))
+                                            || !"LOCAL-DEMO".equals(
+                                            result.getString("model_name"))
+                                            || result.getString(
+                                            "input_snapshot") == null
+                                            || result.getInt("is_demo") != 1
+                                            || result.getInt(
+                                            "attempt_count") != 1
+                                            || result.getTimestamp(
+                                            "started_at") == null
+                                            || result.getTimestamp(
+                                            "completed_at") == null
+                                            || result.getLong(
+                                            "record_count") != 1
+                                            || analysis.path("summary")
+                                            .asText().isBlank()
+                                            || analysis.path(
+                                            "suspectedPhenomenon")
+                                            .asText().isBlank()
+                                            || !analysis.path("checkItems")
+                                            .isArray()
+                                            || analysis.path("checkItems")
+                                            .isEmpty();
+
+                            if (invalid) {
+                                throw new IllegalStateException(
+                                        "AI初判记录不符合预期，targetType="
+                                                + targetType
+                                                + "，targetId=" + targetId);
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+
+            Thread.sleep(200);
+        }
+
+        throw new IllegalStateException(
+                "等待AI初判超时，targetType="
+                        + targetType
+                        + "，targetId=" + targetId);
     }
 
     private record AssignedCase(
@@ -4778,7 +5345,7 @@ public class AdminUserApiCheck {
                         feedback.path("description").asText())
                         || !"PENDING_ASSIGN".equals(
                         feedback.path("status").asText())
-                        || !"PENDING".equals(
+                        || !isAnalysisLifecycleStatus(
                         feedback.path("analysisStatus").asText())
                         || !feedback.has("publicReply")
                         || !feedback.path("publicReply").isNull()

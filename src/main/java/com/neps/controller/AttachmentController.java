@@ -16,7 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-@Tag(name = "反馈附件")
+@Tag(name = "业务附件")
 @RestController
 @RequestMapping("/api")
 public class AttachmentController {
@@ -58,7 +58,7 @@ public class AttachmentController {
             @PathVariable("attachmentId") Long attachmentId) {
 
         AttachmentContent content =
-                attachmentService.getFeedbackImage(attachmentId);
+                attachmentService.getImage(attachmentId);
 
         ContentDisposition disposition =
                 ContentDisposition.attachment()
@@ -75,5 +75,31 @@ public class AttachmentController {
                         HttpHeaders.CONTENT_DISPOSITION,
                         disposition.toString())
                 .body(content.resource());
+    }
+
+    @Operation(summary = "上传处置工单图片")
+    @PostMapping(
+            value = "/grid/work-orders/{workOrderId}/attachments",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public AttachmentResponse uploadWorkOrderImage(
+            @PathVariable("workOrderId")
+            Long workOrderId,
+            @RequestPart("file")
+            MultipartFile file) {
+
+        return attachmentService.uploadWorkOrderImage(
+                workOrderId,
+                file);
+    }
+
+    @Operation(summary = "查询处置工单图片列表")
+    @GetMapping("/grid/work-orders/{workOrderId}/attachments")
+    public List<AttachmentResponse> listWorkOrderImages(
+            @PathVariable("workOrderId")
+            Long workOrderId) {
+
+        return attachmentService.listWorkOrderImages(
+                workOrderId);
     }
 }

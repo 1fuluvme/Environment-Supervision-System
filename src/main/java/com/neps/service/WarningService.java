@@ -1,16 +1,18 @@
 package com.neps.service;
 
-import com.neps.entity.Warning;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.neps.dto.WarningResponse;
+import com.neps.entity.Warning;
 
-/**
- * <p>
- * 内部污染预警 服务类
- * </p>
- *
- * @author neps
- * @since 2026-09-09
- */
-public interface WarningService extends IService<Warning> {
+import java.util.List;
 
+public interface WarningService
+        extends IService<Warning> {
+
+    List<WarningResponse> listForAdmin(
+            String status,
+            String level);
+
+    WarningResponse getForAdmin(
+            Long warningId);
 }
