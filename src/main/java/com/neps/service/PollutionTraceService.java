@@ -1,16 +1,21 @@
 package com.neps.service;
 
-import com.neps.entity.PollutionTrace;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.neps.dto.PollutionTraceGenerateRequest;
+import com.neps.dto.PollutionTraceResponse;
+import com.neps.entity.PollutionTrace;
 
-/**
- * <p>
- * 疑似污染溯源结果 服务类
- * </p>
- *
- * @author neps
- * @since 2026-09-10
- */
-public interface PollutionTraceService extends IService<PollutionTrace> {
+import java.util.List;
 
+public interface PollutionTraceService
+        extends IService<PollutionTrace> {
+
+    PollutionTraceResponse generate(
+            PollutionTraceGenerateRequest request);
+
+    List<PollutionTraceResponse> list(
+            Long anomalyEventId);
+
+    PollutionTraceResponse get(
+            Long traceId);
 }

@@ -42,3 +42,9 @@ app:
     timeout-seconds: ${AI_TIMEOUT_SECONDS:60}
     poll-delay-ms: ${AI_POLL_DELAY_MS:1000}
 
+  trace:
+    time-window-hours: 6
+    max-distance-km: 20
+    direction-tolerance-deg: 45
+    method-version: DEMO-TRACE-1
+
