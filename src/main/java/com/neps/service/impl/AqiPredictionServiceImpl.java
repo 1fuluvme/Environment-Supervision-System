@@ -58,7 +58,7 @@ public class AqiPredictionServiceImpl
 
     @Override
     @Transactional
-    @PreAuthorize("hasAnyRole('ADMIN','DECISION')")
+    @PreAuthorize("hasRole('ADMIN')")
     public AqiPredictionResponse generate(
             AqiPredictionGenerateRequest request) {
 

@@ -29,6 +29,7 @@ public class PollutionTraceController {
     @Operation(summary = "生成疑似污染溯源结果")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
     public PollutionTraceResponse generate(
             @Valid
             @RequestBody

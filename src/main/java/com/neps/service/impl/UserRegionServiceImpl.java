@@ -151,10 +151,33 @@ public class UserRegionServiceImpl
     }
 
     @Override
-    @PreAuthorize("hasRole('DECISION')")
+    @PreAuthorize("hasAnyRole('ADMIN','DECISION')")
     public List<Region> listMyRegions() {
-        User user = currentUser("DECISION");
+        User user = currentRegionUser();
         return baseMapper.selectMyRegions(user.getId());
+    }
+
+    private User currentRegionUser() {
+        String phone = SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getName();
+
+        User user = userMapper.selectOne(
+                Wrappers.<User>lambdaQuery()
+                        .eq(User::getPhone, phone)
+                        .eq(User::getEnabled, 1)
+                        .in(
+                                User::getRole,
+                                List.of("ADMIN", "DECISION")));
+
+        if (user == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "当前账号不能查询授权区域");
+        }
+
+        return user;
     }
 
     private User currentUser(String role) {

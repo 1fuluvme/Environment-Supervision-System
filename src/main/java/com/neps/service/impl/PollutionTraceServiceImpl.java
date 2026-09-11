@@ -86,7 +86,7 @@ public class PollutionTraceServiceImpl
 
     @Override
     @Transactional
-    @PreAuthorize("hasAnyRole('ADMIN','DECISION')")
+    @PreAuthorize("hasRole('ADMIN')")
     public PollutionTraceResponse generate(
             PollutionTraceGenerateRequest request) {
 

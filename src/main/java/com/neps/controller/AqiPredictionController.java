@@ -27,6 +27,7 @@ public class AqiPredictionController {
     }
 
     @Operation(summary = "生成MA7次日AQI预测")
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public AqiPredictionResponse generate(
