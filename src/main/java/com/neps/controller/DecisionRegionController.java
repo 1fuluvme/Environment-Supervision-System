@@ -5,12 +5,14 @@ import com.neps.service.UserRegionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 
 @Tag(name = "决策者授权区域")
 @RestController
 @RequestMapping("/api/decision/regions")
+@PreAuthorize("hasRole('DECISION')")
 public class DecisionRegionController {
 
     private final UserRegionService userRegionService;

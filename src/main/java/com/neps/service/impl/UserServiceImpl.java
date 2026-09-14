@@ -10,6 +10,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import java.nio.charset.StandardCharsets;
 
@@ -17,6 +20,8 @@ import java.nio.charset.StandardCharsets;
 public class UserServiceImpl
         extends ServiceImpl<UserMapper, User>
         implements UserService {
+    private static final Set<String> USER_ROLES =
+            Set.of("PUBLIC", "GRID", "ADMIN", "DECISION");
 
     private final PasswordEncoder passwordEncoder;
 
@@ -96,6 +101,29 @@ public class UserServiceImpl
         }
 
         return user;
+    }
+
+    @Override
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<User> listForAdmin(String role) {
+        String normalizedRole =
+                role == null || role.isBlank()
+                        ? null
+                        : role.strip().toUpperCase(Locale.ROOT);
+
+        if (normalizedRole != null
+                && !USER_ROLES.contains(normalizedRole)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "账号角色不正确");
+        }
+
+        return lambdaQuery()
+                .eq(normalizedRole != null,
+                        User::getRole,
+                        normalizedRole)
+                .orderByDesc(User::getId)
+                .list();
     }
 
     @Override

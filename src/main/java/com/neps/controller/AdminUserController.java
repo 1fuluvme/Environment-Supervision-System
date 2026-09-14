@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import com.neps.dto.AdminUserResponse;
 import com.neps.dto.UpdateUserEnabledRequest;
+import java.util.List;
 
 @Tag(name = "管理员账号管理")
 @RestController
@@ -40,6 +41,20 @@ public class AdminUserController {
                 user.getPhone(),
                 user.getDisplayName(),
                 user.getRole());
+    }
+
+    @Operation(summary = "查询账号列表，可按角色筛选")
+    @GetMapping("/list")
+    public List<AdminUserResponse> list(
+            @RequestParam(
+                    value = "role",
+                    required = false)
+            String role) {
+
+        return userService.listForAdmin(role)
+                .stream()
+                .map(this::toAdminResponse)
+                .toList();
     }
 
     @Operation(summary = "按手机号查询账号")

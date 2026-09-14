@@ -2,6 +2,7 @@ package com.neps.service;
 
 import com.neps.entity.User;
 import com.baomidou.mybatisplus.extension.service.IService;
+import java.util.List;
 
 /**
  * <p>
@@ -20,4 +21,6 @@ public interface UserService extends IService<User> {
     User findByPhoneForAdmin(String phone);
 
     User changeEnabled(Long id, boolean enabled);
+
+    List<User> listForAdmin(String role);
 }
