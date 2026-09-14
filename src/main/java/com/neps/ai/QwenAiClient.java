@@ -124,56 +124,6 @@ public class QwenAiClient {
         return objectMapper.writeValueAsString(result);
     }
 
-    public String answerQuestion(
-            String contextSnapshot) throws Exception {
-
-        validateConfiguration();
-
-        ObjectNode requestBody =
-                objectMapper.createObjectNode();
-
-        requestBody.put("model", model);
-        requestBody.put("enable_thinking", false);
-        requestBody.put("max_completion_tokens", 700);
-
-        requestBody.putObject("response_format")
-                .put("type", "json_object");
-
-        ArrayNode messages =
-                requestBody.putArray("messages");
-
-        messages.addObject()
-                .put("role", "system")
-                .put(
-                        "content",
-                        """
-                        你是环保公众监督系统的只读问答助手。
-                        只能使用用户消息中提供的数据回答，
-                        不得编造数据、来源或结论，
-                        不得执行SQL、修改数据、派发任务或改变业务状态。
-                        监测事实、预测和建议必须分开。
-                        当前没有提供预测数据时，predictions必须为空数组。
-                        每项事实应标明数据中的sourceId。
-                        请只输出JSON，必须包含：
-                        answer字符串、
-                        monitoringFacts字符串数组、
-                        predictions字符串数组、
-                        suggestions字符串数组。
-                        """);
-
-        messages.addObject()
-                .put("role", "user")
-                .put(
-                        "content",
-                        "请根据以下授权数据回答问题："
-                                + contextSnapshot);
-
-        JsonNode result = sendJson(requestBody);
-        validateQuestionResult(result);
-
-        return objectMapper.writeValueAsString(result);
-    }
-
     private JsonNode sendJson(
             ObjectNode requestBody) throws Exception {
 
@@ -222,26 +172,6 @@ public class QwenAiClient {
         } catch (Exception exception) {
             throw new IllegalStateException(
                     "AI服务返回的内容不是合法JSON");
-        }
-    }
-
-    private void validateQuestionResult(
-            JsonNode result) {
-
-        boolean invalid =
-                !result.isObject()
-                        || result.path("answer")
-                        .asText().isBlank()
-                        || !result.path("monitoringFacts")
-                        .isArray()
-                        || !result.path("predictions")
-                        .isArray()
-                        || !result.path("suggestions")
-                        .isArray();
-
-        if (invalid) {
-            throw new IllegalStateException(
-                    "AI问答结果缺少必要字段");
         }
     }
 
