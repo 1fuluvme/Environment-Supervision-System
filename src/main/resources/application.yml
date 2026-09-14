@@ -15,6 +15,16 @@ spring:
     multipart:
       max-file-size: 5MB
       max-request-size: 6MB
+  ai:
+    model:
+      chat: openai
+    openai:
+      base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${AI_API_KEY:unused-in-mock-mode}
+      chat:
+        completions-path: /chat/completions
+        options:
+          model: ${AI_CHAT_MODEL:qwen-plus}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -38,7 +48,8 @@ app:
     provider: ${AI_PROVIDER:QWEN}
     base-url: ${AI_BASE_URL:}
     api-key: ${AI_API_KEY:}
-    model: ${AI_MODEL:qwen3-vl-flash}
+    chat-model: ${AI_CHAT_MODEL:qwen-plus}
+    vision-model: ${AI_VISION_MODEL:qwen3-vl-flash}
     timeout-seconds: ${AI_TIMEOUT_SECONDS:60}
     poll-delay-ms: ${AI_POLL_DELAY_MS:1000}
 

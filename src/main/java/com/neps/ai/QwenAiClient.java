@@ -43,7 +43,7 @@ public class QwenAiClient {
             @Value("${app.ai.api-key:}")
             String apiKey,
 
-            @Value("${app.ai.model:qwen3-vl-flash}")
+            @Value("${app.ai.vision-model:qwen3-vl-flash}")
             String model,
 
             @Value("${app.ai.timeout-seconds:60}")
