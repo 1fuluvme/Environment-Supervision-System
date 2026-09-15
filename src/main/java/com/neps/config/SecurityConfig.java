@@ -14,7 +14,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authorization.AuthorizationDecision;
-import org.springframework.security.config.Customizer;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -66,12 +66,20 @@ public class SecurityConfig {
     // 第二部分：配置请求访问、登录和退出规则
     @Bean
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http) throws Exception {
+            HttpSecurity http,
+            McpApiKeyFilter mcpApiKeyFilter)
+            throws Exception {
 
         http
-                .csrf(Customizer.withDefaults())
+                .csrf(csrf ->
+                        csrf.ignoringRequestMatchers(
+                                "/mcp",
+                                "/mcp/**"))
                 .requestCache(cache -> cache.disable())
                 .httpBasic(basic -> basic.disable())
+                .addFilterBefore(
+                        mcpApiKeyFilter,
+                        UsernamePasswordAuthenticationFilter.class)
 
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR)

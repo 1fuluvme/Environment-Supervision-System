@@ -183,10 +183,11 @@ public class EnvironmentalQueryTools {
                 context);
 
         List<Long> gridIds =
-                gridMapper.selectList(
+                scope.regionIds().isEmpty()
+                        ? List.of()
+                        : gridMapper.selectList(
                                 Wrappers.<Grid>lambdaQuery()
                                         .in(
-                                                !scope.regionIds().isEmpty(),
                                                 Grid::getRegionId,
                                                 scope.regionIds())
                                         .eq(Grid::getEnabled, 1))
@@ -282,10 +283,11 @@ public class EnvironmentalQueryTools {
                 context);
 
         List<PredictionData> predictions =
-                predictionMapper.selectList(
+                scope.regionIds().isEmpty()
+                        ? List.of()
+                        : predictionMapper.selectList(
                                 Wrappers.<AqiPrediction>lambdaQuery()
                                         .in(
-                                                !scope.regionIds().isEmpty(),
                                                 AqiPrediction::getRegionId,
                                                 scope.regionIds())
                                         .between(

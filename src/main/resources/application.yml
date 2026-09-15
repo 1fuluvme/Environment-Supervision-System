@@ -25,6 +25,24 @@ spring:
         completions-path: /chat/completions
         options:
           model: ${AI_CHAT_MODEL:qwen-plus}
+    mcp:
+      server:
+        enabled: ${MCP_ENABLED:false}
+        protocol: STATELESS
+        name: neps-environmental-tools
+        version: 1.0.0
+        type: SYNC
+        instructions: 只提供受限的环保数据只读查询工具
+        tool-callback-converter: true
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        stateless:
+          mcp-endpoint: /mcp
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -58,4 +76,9 @@ app:
     max-distance-km: 20
     direction-tolerance-deg: 45
     method-version: DEMO-TRACE-1
+
+  mcp:
+    enabled: ${MCP_ENABLED:false}
+    api-key: ${MCP_API_KEY:}
+    actor-phone: ${MCP_ACTOR_PHONE:}
 
