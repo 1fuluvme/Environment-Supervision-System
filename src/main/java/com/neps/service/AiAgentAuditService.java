@@ -192,6 +192,88 @@ public class AiAgentAuditService {
                 normalizedStatus);
     }
 
+    public AiAgentAuditSummaryResponse summaryForAdmin(
+            Integer days) {
+
+        if (days == null
+                || days < 1
+                || days > 30) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "统计天数必须在1到30之间");
+        }
+
+        LocalDateTime since =
+                LocalDateTime.now()
+                        .minusDays(days);
+
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT
+                    COUNT(*) AS total_count,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN status = 'SUCCEEDED'
+                                THEN 1
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS succeeded_count,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN status = 'FAILED'
+                                THEN 1
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS failed_count,
+                    COALESCE(
+                        ROUND(AVG(duration_ms)),
+                        0
+                    ) AS average_duration_ms
+                FROM biz_ai_agent_audit
+                WHERE created_at >= ?
+                """,
+                (result, rowNumber) -> {
+                    long total =
+                            result.getLong(
+                                    "total_count");
+
+                    long succeeded =
+                            result.getLong(
+                                    "succeeded_count");
+
+                    long failed =
+                            result.getLong(
+                                    "failed_count");
+
+                    double successRate =
+                            total == 0
+                                    ? 0
+                                    : Math.round(
+                                    succeeded
+                                            * 1000.0
+                                            / total)
+                                    / 10.0;
+
+                    return new AiAgentAuditSummaryResponse(
+                            days,
+                            total,
+                            succeeded,
+                            failed,
+                            successRate,
+                            result.getLong(
+                                    "average_duration_ms"),
+                            since);
+                },
+                Timestamp.valueOf(since));
+    }
+
     private void record(
             AiQuestionRequest request,
             String question,

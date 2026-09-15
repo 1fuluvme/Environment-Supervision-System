@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import com.neps.dto.AiAgentAuditSummaryResponse;
 
 import java.util.List;
 
@@ -31,5 +32,15 @@ public class AdminAiAgentAuditController {
 
         return auditService.listForAdmin(
                 status);
+    }
+
+    @Operation(summary = "查询Agent调用统计概览")
+    @GetMapping("/summary")
+    public AiAgentAuditSummaryResponse summary(
+            @RequestParam(defaultValue = "7")
+            Integer days) {
+
+        return auditService.summaryForAdmin(
+                days);
     }
 }
