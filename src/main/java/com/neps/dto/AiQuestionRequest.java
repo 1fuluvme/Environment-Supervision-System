@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import jakarta.validation.constraints.Pattern;
 import java.time.LocalDate;
 
 public record AiQuestionRequest(
@@ -27,6 +28,11 @@ public record AiQuestionRequest(
         String reportType,
 
         @Positive(message = "异常事件ID必须是正整数")
-        Long anomalyEventId
+        Long anomalyEventId,
+
+        @Pattern(
+                regexp = "^[A-Za-z0-9_-]{1,64}$",
+                message = "会话ID只能包含字母、数字、下划线和横线，且不能超过64个字符")
+        String conversationId
 ) {
 }

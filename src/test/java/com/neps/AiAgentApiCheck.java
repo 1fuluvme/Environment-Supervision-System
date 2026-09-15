@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 public class AiAgentApiCheck {
 
@@ -30,6 +31,12 @@ public class AiAgentApiCheck {
 
     private static final String PREFIX =
             "NEPS_AI_AGENT_CHECK";
+
+    private static final String CONVERSATION_ID =
+            "agent-memory-check";
+
+    private static final String MEMORY_TOKEN =
+            "蓝鲸";
 
     private static final LocalDate START =
             LocalDate.of(2026, 8, 1);
@@ -48,12 +55,19 @@ public class AiAgentApiCheck {
         try {
             TestData data = seed();
 
+            HttpClient anonymous = client();
+
             post(
-                    client(),
+                    anonymous,
                     question(
                             "分析本区域的空气统计、异常、预测和污染溯源情况",
                             data.regionId(),
                             null),
+                    401);
+
+            deleteConversation(
+                    anonymous,
+                    data.regionId(),
                     401);
 
             HttpClient admin = client();
@@ -67,14 +81,67 @@ public class AiAgentApiCheck {
                     post(
                             admin,
                             question(
-                                    "分析本区域的空气统计、异常、预测和污染溯源情况",
+                                    "分析本区域的空气统计、异常、预测和污染溯源情况；"
+                                            + "本次会话识别词是"
+                                            + MEMORY_TOKEN,
                                     data.regionId(),
-                                    null),
+                                    null,
+                                    CONVERSATION_ID),
                             200);
 
             requireOverview(
                     overview,
                     data.regionId());
+
+            JsonNode memoryAnswer =
+                    post(
+                            admin,
+                            question(
+                                    "继续核对空气统计，并告诉我本次会话识别词是什么",
+                                    data.regionId(),
+                                    null,
+                                    CONVERSATION_ID),
+                            200);
+
+            if (!memoryAnswer.path("answer")
+                    .asText()
+                    .contains(MEMORY_TOKEN)) {
+
+                throw new IllegalStateException(
+                        "Agent没有正确使用会话记忆："
+                                + memoryAnswer);
+            }
+
+            String memoryKey =
+                    conversationKey(
+                            data.regionId());
+
+            if (memoryCount(memoryKey) == 0) {
+                throw new IllegalStateException(
+                        "Agent会话记忆没有写入数据库");
+            }
+
+            deleteConversation(
+                    admin,
+                    data.regionId(),
+                    204);
+
+            if (memoryCount(memoryKey) != 0) {
+                throw new IllegalStateException(
+                        "Agent会话记忆清空失败");
+            }
+
+            post(
+                    admin,
+                    question(
+                            "查询空气统计",
+                            data.regionId(),
+                            null,
+                            "invalid conversation"),
+                    400);
+
+            System.out.println(
+                    "Spring AI Agent多轮会话记忆检查通过");
 
             JsonNode event =
                     post(
@@ -540,6 +607,20 @@ public class AiAgentApiCheck {
             Long eventId)
             throws Exception {
 
+        return question(
+                text,
+                regionId,
+                eventId,
+                null);
+    }
+
+    private static String question(
+            String text,
+            long regionId,
+            Long eventId,
+            String conversationId)
+            throws Exception {
+
         var body =
                 JSON.createObjectNode();
 
@@ -559,6 +640,12 @@ public class AiAgentApiCheck {
             body.put(
                     "anomalyEventId",
                     eventId);
+        }
+
+        if (conversationId != null) {
+            body.put(
+                    "conversationId",
+                    conversationId);
         }
 
         return JSON.writeValueAsString(body);
@@ -615,6 +702,103 @@ public class AiAgentApiCheck {
                 ? JSON.nullNode()
                 : JSON.readTree(
                 response.body());
+    }
+
+    private static void deleteConversation(
+            HttpClient client,
+            long regionId,
+            int expectedStatus)
+            throws Exception {
+
+        JsonNode csrf = csrf(client);
+
+        String query =
+                "?regionId=" + regionId
+                        + "&startDate=" + START
+                        + "&endDate=" + END
+                        + "&reportType=REALTIME";
+
+        HttpResponse<String> response =
+                client.send(
+                        HttpRequest.newBuilder()
+                                .uri(URI.create(
+                                        BASE
+                                                + "/api/ai/conversations/"
+                                                + CONVERSATION_ID
+                                                + query))
+                                .header(
+                                        csrf.path("headerName")
+                                                .asText(),
+                                        csrf.path("token")
+                                                .asText())
+                                .DELETE()
+                                .build(),
+                        HttpResponse.BodyHandlers
+                                .ofString());
+
+        if (response.statusCode() != expectedStatus) {
+            throw new IllegalStateException(
+                    "DELETE /api/ai/conversations/"
+                            + CONVERSATION_ID
+                            + " 预期 "
+                            + expectedStatus
+                            + "，实际 "
+                            + response.statusCode()
+                            + "，响应："
+                            + response.body());
+        }
+
+        System.out.println(
+                "通过：DELETE /api/ai/conversations/"
+                        + CONVERSATION_ID
+                        + " → "
+                        + expectedStatus);
+    }
+
+    private static String conversationKey(
+            long regionId) {
+
+        String raw =
+                env("ADMIN_PHONE")
+                        + ":"
+                        + CONVERSATION_ID
+                        + ":"
+                        + regionId
+                        + ":"
+                        + START
+                        + ":"
+                        + END
+                        + ":REALTIME";
+
+        return UUID.nameUUIDFromBytes(
+                        raw.getBytes(
+                                StandardCharsets.UTF_8))
+                .toString();
+    }
+
+    private static long memoryCount(
+            String conversationKey)
+            throws Exception {
+
+        try (Connection connection =
+                     connection();
+             PreparedStatement statement =
+                     connection.prepareStatement(
+                             "SELECT COUNT(*) "
+                                     + "FROM SPRING_AI_CHAT_MEMORY "
+                                     + "WHERE conversation_id = ?")) {
+
+            statement.setString(
+                    1,
+                    conversationKey);
+
+            try (ResultSet result =
+                         statement.executeQuery()) {
+
+                result.next();
+                return result.getLong(1);
+            }
+        }
     }
 
     private static void login(

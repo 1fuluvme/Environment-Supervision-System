@@ -25,6 +25,11 @@ spring:
         completions-path: /chat/completions
         options:
           model: ${AI_CHAT_MODEL:qwen-plus}
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
     mcp:
       server:
         enabled: ${MCP_ENABLED:false}
@@ -33,7 +38,7 @@ spring:
         version: 1.0.0
         type: SYNC
         instructions: 只提供受限的环保数据只读查询工具
-        tool-callback-converter: true
+        tool-callback-converter: false
         annotation-scanner:
           enabled: false
         capabilities:

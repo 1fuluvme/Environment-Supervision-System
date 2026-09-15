@@ -315,10 +315,22 @@ public class EnvironmentalMcpApiCheck {
                             .asText()
                             .isBlank()
                             || !tool.has(
-                            "inputSchema")) {
+                            "inputSchema")
+                            || !tool.path("annotations")
+                            .path("readOnlyHint")
+                            .asBoolean()
+                            || tool.path("annotations")
+                            .path("destructiveHint")
+                            .asBoolean(true)
+                            || !tool.path("annotations")
+                            .path("idempotentHint")
+                            .asBoolean()
+                            || tool.path("annotations")
+                            .path("openWorldHint")
+                            .asBoolean(true)) {
 
                         throw new IllegalStateException(
-                                "MCP工具缺少描述或参数结构："
+                                "MCP工具缺少描述、参数结构或只读声明："
                                         + tool);
                     }
                 });
