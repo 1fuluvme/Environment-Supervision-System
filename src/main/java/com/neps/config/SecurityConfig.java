@@ -87,6 +87,11 @@ public class SecurityConfig {
 
                         .requestMatchers(
                                 HttpMethod.GET,
+                                "/",
+                                "/index.html",
+                                "/assets/**",
+                                "/favicon.svg",
+                                "/icons.svg",
                                 "/api/health",
                                 "/api/grids",
                                 "/api/grids/*",

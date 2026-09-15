@@ -34,6 +34,12 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 
 import java.nio.charset.StandardCharsets;
+
+import com.neps.dto.AiConversationMessageResponse;
+import org.springframework.ai.chat.messages.MessageType;
+
+import com.neps.ai.AiAgentRequestGuard;
+
 @Service
 public class AiQuestionService {
 
@@ -64,11 +70,13 @@ public class AiQuestionService {
     private final RegionMapper regionMapper;
     private final EnvironmentalQueryTools environmentalQueryTools;
     private final ChatClient chatClient;
+    private final AiAgentAuditService auditService;
     private final String chatModel;
     private final ObjectMapper objectMapper;
     private final String mode;
     private final ChatMemory chatMemory;
     private final MessageChatMemoryAdvisor memoryAdvisor;
+    private final AiAgentRequestGuard requestGuard;
 
     public AiQuestionService(
             StatisticsService statisticsService,
@@ -79,8 +87,10 @@ public class AiQuestionService {
             RegionMapper regionMapper,
             ObjectMapper objectMapper,
             EnvironmentalQueryTools environmentalQueryTools,
+            AiAgentRequestGuard requestGuard,
             ChatMemoryRepository chatMemoryRepository,
             ChatClient.Builder chatClientBuilder,
+            AiAgentAuditService auditService,
             @Value("${app.ai.mode:mock}")
             String mode,
             @Value("${app.ai.chat-model:qwen-plus}")
@@ -95,6 +105,8 @@ public class AiQuestionService {
         this.objectMapper = objectMapper;
         this.environmentalQueryTools =
                 environmentalQueryTools;
+        this.requestGuard = requestGuard;
+        this.auditService = auditService;
         this.chatClient = chatClientBuilder.build();
 
         this.chatMemory =
@@ -117,12 +129,37 @@ public class AiQuestionService {
     public AiQuestionResponse answer(
             AiQuestionRequest request) {
 
-        String question = request.question().trim();
+        String question =
+                request.question()
+                        .trim();
 
-        validateQuestion(question, request.anomalyEventId());
+        validateQuestion(
+                question,
+                request.anomalyEventId());
+
+        String username =
+                SecurityContextHolder.getContext()
+                        .getAuthentication()
+                        .getName();
+
+        try (AiAgentRequestGuard.Permit ignored =
+                     requestGuard.acquire(
+                             username)) {
+
+            return answerWithinGuard(
+                    request,
+                    question);
+        }
+    }
+
+    private AiQuestionResponse answerWithinGuard(
+            AiQuestionRequest request,
+            String question) {
 
         if (!"mock".equalsIgnoreCase(mode)) {
-            return agentAnswer(request, question);
+            return agentAnswer(
+                    request,
+                    question);
         }
 
         /*
@@ -221,6 +258,38 @@ public class AiQuestionService {
                 "LOCAL-DEMO",
                 true,
                 LocalDateTime.now());
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','DECISION')")
+    public List<AiConversationMessageResponse>
+    getConversation(
+            String conversationId,
+            Long regionId,
+            LocalDate startDate,
+            LocalDate endDate,
+            String reportType) {
+
+        String key =
+                conversationKey(
+                        conversationId,
+                        regionId,
+                        startDate,
+                        endDate,
+                        reportType);
+
+        return chatMemory.get(key)
+                .stream()
+                .filter(message ->
+                        message.getMessageType()
+                                == MessageType.USER
+                                || message.getMessageType()
+                                == MessageType.ASSISTANT)
+                .map(message ->
+                        new AiConversationMessageResponse(
+                                message.getMessageType()
+                                        .getValue(),
+                                message.getText()))
+                .toList();
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','DECISION')")
@@ -734,6 +803,9 @@ public class AiQuestionService {
                         EnvironmentalQueryTools.USAGE_KEY,
                         usage);
 
+        long startedNanos =
+                System.nanoTime();
+
         try {
             ChatClient.ChatClientRequestSpec prompt =
                     chatClient.prompt()
@@ -811,29 +883,60 @@ public class AiQuestionService {
             StatisticsResponse statistics =
                     scope.statistics();
 
-            return new AiQuestionResponse(
+            AiQuestionResponse response =
+                    new AiQuestionResponse(
+                            question,
+                            statistics.regionId(),
+                            statistics.regionName(),
+                            statistics.startDate(),
+                            statistics.endDate(),
+                            statistics.reportType(),
+                            generated.answer(),
+                            List.copyOf(
+                                    generated.monitoringFacts()),
+                            List.copyOf(
+                                    generated.predictions()),
+                            List.copyOf(
+                                    generated.suggestions()),
+                            sources,
+                            "QWEN",
+                            chatModel,
+                            false,
+                            LocalDateTime.now());
+
+            auditService.recordSucceeded(
+                    request,
                     question,
-                    statistics.regionId(),
-                    statistics.regionName(),
-                    statistics.startDate(),
-                    statistics.endDate(),
-                    statistics.reportType(),
-                    generated.answer(),
-                    List.copyOf(
-                            generated.monitoringFacts()),
-                    List.copyOf(
-                            generated.predictions()),
-                    List.copyOf(
-                            generated.suggestions()),
                     sources,
                     "QWEN",
                     chatModel,
-                    false,
-                    LocalDateTime.now());
+                    elapsedMillis(
+                            startedNanos));
+
+            return response;
 
         } catch (ResponseStatusException exception) {
+            auditService.recordFailed(
+                    request,
+                    question,
+                    "QWEN",
+                    chatModel,
+                    elapsedMillis(
+                            startedNanos),
+                    exception);
+
             throw exception;
+
         } catch (Exception exception) {
+            auditService.recordFailed(
+                    request,
+                    question,
+                    "QWEN",
+                    chatModel,
+                    elapsedMillis(
+                            startedNanos),
+                    exception);
+
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "AI问答服务暂时不可用，请稍后重试");
@@ -982,6 +1085,16 @@ public class AiQuestionService {
                 request.startDate(),
                 request.endDate(),
                 request.reportType());
+    }
+
+    private long elapsedMillis(
+            long startedNanos) {
+
+        return Math.max(
+                0,
+                (System.nanoTime()
+                        - startedNanos)
+                        / 1_000_000);
     }
 
     private String conversationKey(

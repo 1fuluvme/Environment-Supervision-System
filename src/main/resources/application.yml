@@ -75,6 +75,8 @@ app:
     vision-model: ${AI_VISION_MODEL:qwen3-vl-flash}
     timeout-seconds: ${AI_TIMEOUT_SECONDS:60}
     poll-delay-ms: ${AI_POLL_DELAY_MS:1000}
+    max-requests-per-window: ${AI_MAX_REQUESTS_PER_WINDOW:10}
+    rate-limit-window-seconds: ${AI_RATE_LIMIT_WINDOW_SECONDS:60}
 
   trace:
     time-window-hours: 6

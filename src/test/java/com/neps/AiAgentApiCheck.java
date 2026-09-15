@@ -70,6 +70,20 @@ public class AiAgentApiCheck {
                     data.regionId(),
                     401);
 
+            getConversation(
+                    anonymous,
+                    data.regionId(),
+                    401);
+
+            getAudits(
+                    anonymous,
+                    401);
+
+            getAuditSummary(
+                    anonymous,
+                    7,
+                    401);
+
             HttpClient admin = client();
 
             login(
@@ -121,6 +135,15 @@ public class AiAgentApiCheck {
                         "Agent会话记忆没有写入数据库");
             }
 
+            JsonNode messages =
+                    getConversation(
+                            admin,
+                            data.regionId(),
+                            200);
+
+            requireConversationMessages(
+                    messages);
+
             deleteConversation(
                     admin,
                     data.regionId(),
@@ -129,6 +152,15 @@ public class AiAgentApiCheck {
             if (memoryCount(memoryKey) != 0) {
                 throw new IllegalStateException(
                         "Agent会话记忆清空失败");
+            }
+
+            if (!getConversation(
+                    admin,
+                    data.regionId(),
+                    200).isEmpty()) {
+
+                throw new IllegalStateException(
+                        "Agent会话清空后仍返回上下文消息");
             }
 
             post(
@@ -167,6 +199,34 @@ public class AiAgentApiCheck {
             if (workOrderCount() != 0) {
                 throw new IllegalStateException(
                         "Agent只读检查失败：产生了工单");
+            }
+
+            JsonNode audits =
+                    getAudits(
+                            admin,
+                            200);
+
+            requireAudits(
+                    audits,
+                    data.regionId());
+
+            JsonNode summary =
+                    getAuditSummary(
+                            admin,
+                            7,
+                            200);
+
+            requireAuditSummary(
+                    summary);
+
+            getAuditSummary(
+                    admin,
+                    0,
+                    400);
+
+            if (auditCount() < 2) {
+                throw new IllegalStateException(
+                        "Agent成功调用没有完整写入审计日志");
             }
 
             System.out.println(
@@ -755,6 +815,280 @@ public class AiAgentApiCheck {
                         + expectedStatus);
     }
 
+    private static JsonNode getConversation(
+            HttpClient client,
+            long regionId,
+            int expectedStatus)
+            throws Exception {
+
+        String query =
+                "?regionId=" + regionId
+                        + "&startDate=" + START
+                        + "&endDate=" + END
+                        + "&reportType=REALTIME";
+
+        HttpResponse<String> response =
+                client.send(
+                        HttpRequest.newBuilder()
+                                .uri(URI.create(
+                                        BASE
+                                                + "/api/ai/conversations/"
+                                                + CONVERSATION_ID
+                                                + query))
+                                .GET()
+                                .build(),
+                        HttpResponse.BodyHandlers
+                                .ofString());
+
+        if (response.statusCode() != expectedStatus) {
+            throw new IllegalStateException(
+                    "GET /api/ai/conversations/"
+                            + CONVERSATION_ID
+                            + " 预期 "
+                            + expectedStatus
+                            + "，实际 "
+                            + response.statusCode()
+                            + "，响应："
+                            + response.body());
+        }
+
+        System.out.println(
+                "通过：GET /api/ai/conversations/"
+                        + CONVERSATION_ID
+                        + " → "
+                        + expectedStatus);
+
+        return response.body().isBlank()
+                ? JSON.nullNode()
+                : JSON.readTree(
+                response.body());
+    }
+
+    private static void requireConversationMessages(
+            JsonNode messages) {
+
+        if (!messages.isArray()
+                || messages.isEmpty()) {
+
+            throw new IllegalStateException(
+                    "Agent会话没有返回上下文消息："
+                            + messages);
+        }
+
+        boolean hasUser = false;
+        boolean hasAssistant = false;
+        boolean hasToken = false;
+
+        for (JsonNode message : messages) {
+            String role =
+                    message.path("role")
+                            .asText();
+
+            if (!Set.of("user", "assistant")
+                    .contains(role)) {
+
+                throw new IllegalStateException(
+                        "Agent会话暴露了内部消息："
+                                + message);
+            }
+
+            hasUser |= "user".equals(role);
+            hasAssistant |=
+                    "assistant".equals(role);
+            hasToken |= message.path("content")
+                    .asText()
+                    .contains(MEMORY_TOKEN);
+        }
+
+        if (!hasUser
+                || !hasAssistant
+                || !hasToken) {
+
+            throw new IllegalStateException(
+                    "Agent会话上下文结构不完整："
+                            + messages);
+        }
+    }
+
+    private static JsonNode getAudits(
+            HttpClient client,
+            int expectedStatus)
+            throws Exception {
+
+        HttpResponse<String> response =
+                client.send(
+                        HttpRequest.newBuilder()
+                                .uri(URI.create(
+                                        BASE
+                                                + "/api/admin/ai/agent-audits"
+                                                + "?status=SUCCEEDED"))
+                                .GET()
+                                .build(),
+                        HttpResponse.BodyHandlers
+                                .ofString());
+
+        if (response.statusCode() != expectedStatus) {
+            throw new IllegalStateException(
+                    "GET /api/admin/ai/agent-audits 预期 "
+                            + expectedStatus
+                            + "，实际 "
+                            + response.statusCode()
+                            + "，响应："
+                            + response.body());
+        }
+
+        System.out.println(
+                "通过：GET /api/admin/ai/agent-audits → "
+                        + expectedStatus);
+
+        return response.body().isBlank()
+                ? JSON.nullNode()
+                : JSON.readTree(
+                response.body());
+    }
+
+    private static void requireAudits(
+            JsonNode audits,
+            long regionId) {
+
+        if (!audits.isArray()) {
+            throw new IllegalStateException(
+                    "Agent审计接口没有返回数组："
+                            + audits);
+        }
+
+        int matched = 0;
+
+        for (JsonNode audit : audits) {
+            if (!CONVERSATION_ID.equals(
+                    audit.path("conversationId")
+                            .asText())) {
+                continue;
+            }
+
+            boolean invalid =
+                    audit.path("regionId")
+                            .asLong() != regionId
+                            || !"SUCCEEDED".equals(
+                            audit.path("status")
+                                    .asText())
+                            || !"QWEN".equals(
+                            audit.path("provider")
+                                    .asText())
+                            || audit.path("modelName")
+                            .asText()
+                            .isBlank()
+                            || audit.path("question")
+                            .asText()
+                            .isBlank()
+                            || !audit.path("sourceTypes")
+                            .isArray()
+                            || audit.path("sourceTypes")
+                            .isEmpty()
+                            || audit.path("durationMs")
+                            .asLong(-1) < 0
+                            || audit.path("createdAt")
+                            .asText()
+                            .isBlank();
+
+            if (invalid) {
+                throw new IllegalStateException(
+                        "Agent审计记录不完整："
+                                + audit);
+            }
+
+            matched++;
+        }
+
+        if (matched < 2) {
+            throw new IllegalStateException(
+                    "Agent审计接口缺少本轮会话记录："
+                            + audits);
+        }
+    }
+
+    private static JsonNode getAuditSummary(
+            HttpClient client,
+            int days,
+            int expectedStatus)
+            throws Exception {
+
+        HttpResponse<String> response =
+                client.send(
+                        HttpRequest.newBuilder()
+                                .uri(URI.create(
+                                        BASE
+                                                + "/api/admin/ai/agent-audits/summary"
+                                                + "?days="
+                                                + days))
+                                .GET()
+                                .build(),
+                        HttpResponse.BodyHandlers
+                                .ofString());
+
+        if (response.statusCode() != expectedStatus) {
+            throw new IllegalStateException(
+                    "GET /api/admin/ai/agent-audits/summary 预期 "
+                            + expectedStatus
+                            + "，实际 "
+                            + response.statusCode()
+                            + "，响应："
+                            + response.body());
+        }
+
+        System.out.println(
+                "通过：GET /api/admin/ai/agent-audits/summary → "
+                        + expectedStatus);
+
+        return response.body().isBlank()
+                ? JSON.nullNode()
+                : JSON.readTree(
+                response.body());
+    }
+
+    private static void requireAuditSummary(
+            JsonNode summary) {
+
+        long total =
+                summary.path("totalCount")
+                        .asLong(-1);
+
+        long succeeded =
+                summary.path("succeededCount")
+                        .asLong(-1);
+
+        long failed =
+                summary.path("failedCount")
+                        .asLong(-1);
+
+        double successRate =
+                summary.path("successRatePct")
+                        .asDouble(-1);
+
+        boolean invalid =
+                summary.path("days")
+                        .asInt() != 7
+                        || total < 2
+                        || succeeded < 2
+                        || failed < 0
+                        || total
+                        != succeeded + failed
+                        || successRate < 0
+                        || successRate > 100
+                        || summary.path(
+                                "averageDurationMs")
+                        .asLong(-1) < 0
+                        || summary.path("since")
+                        .asText()
+                        .isBlank();
+
+        if (invalid) {
+            throw new IllegalStateException(
+                    "Agent审计统计不正确："
+                            + summary);
+        }
+    }
+
     private static String conversationKey(
             long regionId) {
 
@@ -1052,6 +1386,31 @@ public class AiAgentApiCheck {
         }
     }
 
+    private static long auditCount()
+            throws Exception {
+
+        try (Connection connection =
+                     connection();
+             PreparedStatement statement =
+                     connection.prepareStatement(
+                             "SELECT COUNT(*) "
+                                     + "FROM biz_ai_agent_audit "
+                                     + "WHERE conversation_id = ? "
+                                     + "AND status = 'SUCCEEDED'")) {
+
+            statement.setString(
+                    1,
+                    CONVERSATION_ID);
+
+            try (ResultSet result =
+                         statement.executeQuery()) {
+
+                result.next();
+                return result.getLong(1);
+            }
+        }
+    }
+
     private static void cleanup()
             throws Exception {
 
@@ -1059,6 +1418,17 @@ public class AiAgentApiCheck {
                      connection();
              Statement statement =
                      connection.createStatement()) {
+
+            try (PreparedStatement auditDelete =
+                         connection.prepareStatement(
+                                 "DELETE FROM biz_ai_agent_audit "
+                                         + "WHERE conversation_id = ?")) {
+
+                auditDelete.setString(
+                        1,
+                        CONVERSATION_ID);
+                auditDelete.executeUpdate();
+            }
 
             statement.executeUpdate("""
                     DELETE t

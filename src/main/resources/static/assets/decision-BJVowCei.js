@@ -1,0 +1,1 @@
+import{n as e}from"./http-DbxlGyO-.js";async function t(){let{data:t}=await e.get(`/decision/regions`);return t}async function n(t,n,r){let{data:i}=await e.get(`/decision/dashboard`,{params:{regionId:t,startDate:n,endDate:r}});return i}export{t as n,n as t};
